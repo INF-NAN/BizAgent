@@ -1,0 +1,22 @@
+# Separate uv environment for training (rule R11). Never import any of this from the app env.
+# Phase 1 only locks it; installing requires a Linux x86_64 + CUDA machine (UNVERIFIED-LOCAL).
+[project]
+name = "bizagent-workbench-train"
+version = "0.1.0"
+description = "Training environment: AgentFly (+ its veRL fork) exactly as pinned upstream."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Upstream pins are taken as-is from third_party/AgentFly/pyproject.toml (vllm==0.19.0 etc.).
+    "agentfly[verl]",
+]
+
+[tool.uv]
+package = false
+# The GPU stack only exists for Linux x86_64; lock for that platform only.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+agentfly = { path = "../third_party/AgentFly", editable = true }
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
