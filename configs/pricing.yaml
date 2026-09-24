@@ -1,8 +1,16 @@
 # Price table for synthesis COST ESTIMATES only (workbench synth ledger).
-# Values are per 1M tokens in `currency`. They are placeholders — fill them in from your
-# provider's current price list. A model missing here is reported as "unpriced".
-currency: USD
-models: {}
-#  your-model-name:
-#    input_per_1m: 0.0
-#    output_per_1m: 0.0
+# Values are per 1M tokens in `currency`. A model missing here is reported as "unpriced".
+#
+# deepseek-flash: DeepSeek's official price page
+#   https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+# read with curl on 2026-09-24 at 16:55 UTC and again at 20:43 UTC (unchanged). The page lists
+# input prices for cache hit / cache miss and an output price, each for off-peak and peak hours
+# (off-peak is half the peak price). The ledger keeps one input and one output price per model,
+# so these are the highest ones: peak hours, input counted as cache miss. Costs computed from
+# this table are therefore upper bounds. Verbatim excerpt: docs/verification/cost-ledger.md §1.
+# DeepSeek returns "model": "deepseek-flash" in its responses, which is the key the ledger uses.
+currency: CNY
+models:
+  deepseek-flash:
+    input_per_1m: 2.0
+    output_per_1m: 8.0
