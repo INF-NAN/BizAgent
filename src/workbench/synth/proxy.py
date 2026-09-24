@@ -4,7 +4,10 @@ AWM's GPTClient talks to ``OPENAI_BASE_URL`` (third_party/agent-world-model/awm/
 71-75); scenario generation also calls embeddings via ``EMBEDDING_OPENAI_BASE_URL``
 (awm/core/scenario.py:83-86). Pointing both at ``http://127.0.0.1:<port>/step/<step>/v1``
 lets us, without touching AWM code: (1) cache identical requests on disk, (2) retry network
-errors / 5xx with backoff, (3) attribute token usage to the pipeline step in the ledger.
+errors / 5xx with backoff, (3) attribute token usage to the pipeline step in the ledger, and
+(4) stop at a budget (ADR-023): once the run's ledger cost reaches it, requests that would go
+upstream are refused with HTTP 402 (cache hits are still served), which makes the current step
+fail; the runner then marks it failed and a rerun with a higher budget resumes.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from workbench.synth.ledger import Ledger, LedgerEntry
+from workbench.synth.ledger import Ledger, LedgerEntry, Price
 
 
 def cache_key(endpoint: str, body: bytes) -> str:
@@ -37,6 +40,9 @@ def create_proxy_app(
     max_retries: int = 3,
     backoff_s: float = 1.0,
     transport: httpx.AsyncBaseTransport | None = None,
+    prices: dict[str, Price] | None = None,
+    budget: float | None = None,
+    currency: str = "CNY",
 ) -> Starlette:
     client = httpx.AsyncClient(
         base_url=upstream_base_url.rstrip("/"),
@@ -45,6 +51,20 @@ def create_proxy_app(
         transport=transport,
     )
     cache_dir.mkdir(parents=True, exist_ok=True)
+    price_table = prices or {}
+
+    def over_budget(model: str) -> str | None:
+        """Why a request must not go upstream, or None. Fails closed on models without a price."""
+        if budget is None:
+            return None
+        if model not in price_table:
+            return f"model {model!r} has no price in the pricing file, so the budget cannot be enforced"
+        spent, unpriced = ledger.spent(price_table)
+        if unpriced:
+            return f"the ledger has models without a price ({', '.join(unpriced)})"
+        if spent >= budget:
+            return f"budget reached: spent {spent:.4f} {currency} of {budget} {currency}"
+        return None
 
     async def forward(request: Request) -> JSONResponse:
         step = request.path_params["step"]
@@ -59,6 +79,14 @@ def create_proxy_app(
                 LedgerEntry(step, str(payload.get("model", "")), 0, 0, cached=True, endpoint=endpoint)
             )
             return JSONResponse(data)
+        model = str(payload.get("model", ""))
+        if reason := over_budget(model):
+            ledger.record(LedgerEntry(step, model, 0, 0, cached=False, endpoint=endpoint, refused=True))
+            message = (
+                f"workbench synthesis stopped: {reason}. Raise synth.budget (e.g. WORKBENCH_SYNTH__BUDGET)"
+                " and run the same command again to resume."
+            )
+            return JSONResponse({"error": {"message": message, "type": "budget_exceeded"}}, status_code=402)
         last: str = ""
         for attempt in range(max_retries + 1):
             try:

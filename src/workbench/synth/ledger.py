@@ -20,6 +20,8 @@ class LedgerEntry:
     completion_tokens: int
     cached: bool
     endpoint: str = "chat"
+    # True when the proxy refused to forward the request (budget stop, ADR-023): nothing was billed.
+    refused: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,11 +59,28 @@ class Ledger:
             if ln.strip()
         ]
 
+    def spent(self, prices: dict[str, Price]) -> tuple[float, list[str]]:
+        """Cost of the billed entries so far, and the models that have no price (ADR-023)."""
+        total = 0.0
+        unpriced: set[str] = set()
+        for e in self.entries():
+            if e.cached or e.refused:
+                continue
+            price = prices.get(e.model)
+            if price is None:
+                unpriced.add(e.model)
+                continue
+            total += (
+                e.prompt_tokens / 1e6 * price.input_per_1m + e.completion_tokens / 1e6 * price.output_per_1m
+            )
+        return total, sorted(unpriced)
+
     def summary(self, prices: dict[str, Price], currency: str = "USD") -> dict[str, Any]:
         steps: dict[str, dict[str, Any]] = defaultdict(
             lambda: {
                 "calls": 0,
                 "cached_calls": 0,
+                "refused_calls": 0,
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "cost": 0.0,
@@ -70,6 +89,9 @@ class Ledger:
         )
         for e in self.entries():
             s = steps[e.step]
+            if e.refused:  # never reached the upstream
+                s["refused_calls"] += 1
+                continue
             s["calls"] += 1
             if e.cached:
                 s["cached_calls"] += 1

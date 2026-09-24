@@ -36,3 +36,10 @@ api:
   host: 127.0.0.1
   port: 8080
   max_sessions: 4
+
+synth:
+  # Budget stop for `workbench synth run --execute` (ADR-023): once the run's ledger cost, priced
+  # with configs/pricing.yaml (CNY), reaches this value the local proxy refuses to forward and the
+  # current step fails; raise it (e.g. WORKBENCH_SYNTH__BUDGET=8) and rerun the same command to
+  # resume. null disables the stop.
+  budget: 5.0

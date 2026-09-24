@@ -407,7 +407,7 @@ def synth_run(
     """Plan (default) or execute AWM's gen steps with checkpoints, LLM cache, ledger and validation."""
     import os
 
-    from workbench.synth.ledger import Ledger
+    from workbench.synth.ledger import Ledger, load_prices
     from workbench.synth.proxy import create_proxy_app
     from workbench.synth.runner import ProxyThread, SynthError, SynthInterrupted, SynthRunner
 
@@ -426,11 +426,15 @@ def synth_run(
             return
         s = settings.synth
         upstream = os.environ.get(s.upstream_base_url_env) or "https://api.openai.com/v1"
+        currency, prices = load_prices(s.pricing_file)
         app = create_proxy_app(
             upstream_base_url=upstream,
             upstream_api_key=os.environ.get(s.upstream_api_key_env),
             cache_dir=out / "llm_cache",
             ledger=Ledger(out / "ledger.jsonl"),
+            prices=prices,
+            budget=s.budget,  # ADR-023
+            currency=currency,
         )
         with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
             result = runner.execute(proxy_base=base)

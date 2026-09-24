@@ -15,6 +15,8 @@ verifier mode. Rules enforced here:
   everything the step started (AWM starts test servers in their own sessions, awm/core/env.py:
   161-172), mark the step ``interrupted`` and exit; the same command resumes (ADR-022). A step
   that did not finish starts again without its outputs: they are moved to ``attempts/`` first.
+- Budget stop: before a step and after it, the run's ledger cost is checked against
+  ``synth.budget``; the proxy refuses to forward once it is reached (ADR-023).
 - ``--scenario-file`` starts at `gen task` with a hand-written scenario file instead of running
   `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-021). `gen task`
   reads only each line's ``name`` and ``description`` (awm/core/task.py:44-45, 126).
@@ -41,7 +43,7 @@ from typing import Any
 from workbench.config import Settings
 from workbench.envs.procs import descendants, live_group_members
 from workbench.subprocess_env import LLM_VARS, NETWORK_VARS, generated_code_env, pick
-from workbench.synth.ledger import Ledger, load_prices
+from workbench.synth.ledger import Ledger, Price, load_prices
 from workbench.synth.validate import ValidationReport, parse_check_all
 
 STEPS = ("scenario", "task", "db", "sample", "spec", "env", "verifier")
@@ -61,6 +63,10 @@ class SynthError(RuntimeError):
 
 class SynthInterrupted(SynthError):
     """SIGINT/SIGTERM during a step or the validation; the same command resumes (ADR-022)."""
+
+
+class SynthBudgetExceeded(SynthError):
+    """The run's ledger cost reached ``synth.budget`` (ADR-023)."""
 
 
 @dataclass(frozen=True)
@@ -379,6 +385,7 @@ class SynthRunner:
             ),
             "required_env": list(self.required_env),
             "missing_env": [k for k in self.required_env if not self._environ.get(k)],
+            "budget": self._budget_view(),
             "steps": [
                 {
                     "name": s.name,
@@ -474,6 +481,30 @@ class SynthRunner:
             (self.run_dir / name).rename(dest / name)
         return str(dest.relative_to(self.run_dir))
 
+    def _budget_view(self) -> dict[str, Any]:
+        currency, prices = load_prices(self.settings.synth.pricing_file)
+        spent, unpriced = self.ledger.spent(prices)
+        view: dict[str, Any] = {"limit": self.settings.synth.budget, "currency": currency}
+        view["spent_so_far"] = round(spent, 4)
+        if unpriced:
+            view["unpriced_models"] = unpriced
+        return view
+
+    def _budget_block(self, prices: dict[str, Price], currency: str) -> str | None:
+        """Why no further step may start (budget reached, or it cannot be enforced), or None."""
+        budget = self.settings.synth.budget
+        if budget is None:
+            return None
+        model = self._environ.get("AWM_SYN_OVERRIDE_MODEL", "")
+        if model not in prices:
+            return f"model {model!r} has no price in {self.settings.synth.pricing_file}"
+        spent, unpriced = self.ledger.spent(prices)
+        if unpriced:
+            return f"the ledger has models without a price ({', '.join(unpriced)})"
+        if spent >= budget:
+            return f"budget reached: spent {spent:.4f} {currency} of {budget} {currency}"
+        return None
+
     def execute(self, proxy_base: str | None = None, validate: bool = True) -> dict[str, Any]:
         missing = [k for k in self.required_env if not self._environ.get(k)]
         if missing:
@@ -486,7 +517,13 @@ class SynthRunner:
                 done = state.steps.get(step.name, {}).get("status") == "done"
                 if done and all((self.run_dir / o).exists() for o in step.outputs):
                     continue  # checkpoint: resume after the last completed step
+                if reason := self._budget_block(prices, currency):
+                    raise SynthBudgetExceeded(
+                        f"not starting step {step.name}: {reason}. Raise synth.budget "
+                        "(e.g. WORKBENCH_SYNTH__BUDGET) or add the price, then run the same command again."
+                    )
                 aside = {"set_aside": moved} if (moved := self._set_aside(step.name)) else {}
+                seen = len(self.ledger.entries())
                 started = time.time()
                 try:
                     rc = self._run(
@@ -505,14 +542,24 @@ class SynthRunner:
                     raise SynthInterrupted(
                         f"interrupted during step {step.name}; run the same command again to resume"
                     ) from exc
-                ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs)
+                refused = [e for e in self.ledger.entries()[seen:] if e.refused]
+                ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs) and not refused
                 state.steps[step.name] = {
                     "status": "done" if ok else "failed",
                     "returncode": rc,
                     "seconds": round(time.time() - started, 1),
                     **aside,
                 }
+                if refused:
+                    state.steps[step.name]["reason"] = "budget"
                 state.save(self.state_path)
+                if refused:
+                    budget = f"{self.settings.synth.budget} {currency}"
+                    raise SynthBudgetExceeded(
+                        f"step {step.name} failed: the proxy refused {len(refused)} request(s) at "
+                        f"synth.budget {budget}. Raise it (e.g. WORKBENCH_SYNTH__BUDGET) and run the "
+                        "same command again to resume."
+                    )
                 if not ok:
                     raise SynthError(
                         f"step {step.name} failed (rc={rc}); see {self.run_dir / 'logs' / step.name}.log"

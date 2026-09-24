@@ -110,10 +110,10 @@ def fake_upstream(delay_s: float = 0.0, prompt_tokens: int = 1000, completion_to
 
 
 def start_driver(
-    run_dir: Path, upstream: str, *, requests: int, server_step: str = "-"
+    run_dir: Path, upstream: str, *, requests: int, server_step: str = "-", budget: float | None = None
 ) -> subprocess.Popen[bytes]:
     """Start the driver process; its PID is exactly the process a test signals."""
-    args = [str(run_dir), upstream, str(requests), server_step]
+    args = [str(run_dir), upstream, str(requests), server_step, str(budget)]
     return subprocess.Popen(
         [sys.executable, "-m", "tests.unit.synth_harness", *args], cwd=Path(__file__).resolve().parents[2]
     )
@@ -121,10 +121,11 @@ def start_driver(
 
 def main(argv: list[str]) -> int:
     from workbench.config import Settings
-    from workbench.synth.ledger import Ledger
+    from workbench.synth.ledger import Ledger, load_prices
     from workbench.synth.proxy import create_proxy_app
     from workbench.synth.runner import (
         ProxyThread,
+        SynthBudgetExceeded,
         SynthError,
         SynthInterrupted,
         SynthRunner,
@@ -136,7 +137,9 @@ def main(argv: list[str]) -> int:
     parser.add_argument("upstream")
     parser.add_argument("requests", type=int)
     parser.add_argument("server_step")
+    parser.add_argument("budget")
     a = parser.parse_args(argv)
+    budget = None if a.budget == "None" else float(a.budget)
     pricing = a.run_dir.parent / "pricing.yaml"
     pricing.parent.mkdir(parents=True, exist_ok=True)
     pricing.write_text(PRICING, encoding="utf-8")
@@ -148,16 +151,20 @@ def main(argv: list[str]) -> int:
         fake = [sys.executable, "-c", FAKE_STEP, cmd[cmd.index(flag) + 1], step, str(a.requests), pidfile]
         return default_command_runner(fake, env, log)
 
-    settings = Settings(synth={"out_dir": a.run_dir.parent, "pricing_file": pricing})  # type: ignore[arg-type]
+    settings = Settings(synth={"out_dir": a.run_dir.parent, "budget": budget, "pricing_file": pricing})  # type: ignore[arg-type]
     environ = {"PATH": os.environ["PATH"], "OPENAI_API_KEY": "k", "AWM_SYN_OVERRIDE_MODEL": MODEL}
     environ["EMBEDDING_OPENAI_API_KEY"] = "e"  # pragma: allowlist secret
     runner = SynthRunner(settings, a.run_dir, scenarios=1, command_runner=run_step, environ=environ)
+    currency, prices = load_prices(pricing)
     app = create_proxy_app(
         upstream_base_url=a.upstream,
         upstream_api_key=None,
         cache_dir=a.run_dir / "llm_cache",
         ledger=Ledger(a.run_dir / "ledger.jsonl"),
         max_retries=0,
+        prices=prices,
+        budget=budget,
+        currency=currency,
     )
     with ProxyThread(app, "127.0.0.1", free_port()) as base:
         try:
@@ -165,6 +172,9 @@ def main(argv: list[str]) -> int:
         except SynthInterrupted as exc:
             print(exc)
             return 130
+        except SynthBudgetExceeded as exc:
+            print(exc)
+            return 3
         except SynthError as exc:
             print(exc)
             return 1

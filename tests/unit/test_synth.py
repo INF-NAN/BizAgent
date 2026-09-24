@@ -19,7 +19,7 @@ ENV = {"OPENAI_API_KEY": "k", "AWM_SYN_OVERRIDE_MODEL": "m", "EMBEDDING_OPENAI_A
 
 
 def settings(tmp_path: Path) -> Settings:
-    return Settings(synth={"out_dir": tmp_path / "synth"})  # type: ignore[arg-type]
+    return Settings(synth={"out_dir": tmp_path / "synth", "budget": None})  # type: ignore[arg-type]
 
 
 class FakeAwm:
@@ -251,7 +251,7 @@ def test_scenario_file_refuses_names_from_the_official_list(tmp_path: Path) -> N
     official = tmp_path / "official"
     official.mkdir()
     (official / "gen_scenario.jsonl").write_text(json.dumps(LOCAL_SCENARIO) + "\n", encoding="utf-8")
-    s = Settings(synth={"out_dir": tmp_path / "synth"}, env={"dataset_dir": official})  # type: ignore[arg-type]
+    s = Settings(synth={"out_dir": tmp_path / "synth", "budget": None}, env={"dataset_dir": official})  # type: ignore[arg-type]
     with pytest.raises(SynthError, match="official scenario name"):
         SynthRunner(s, tmp_path / "synth" / "r", scenarios=1, scenario_file=scenario_file(tmp_path))
     run_dir = tmp_path / "synth" / "r5"

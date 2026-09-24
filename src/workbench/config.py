@@ -115,6 +115,9 @@ class SynthSettings(BaseModel):
     proxy_port: int = 8095
     upstream_base_url_env: str = "OPENAI_BASE_URL"
     upstream_api_key_env: str = "OPENAI_API_KEY"
+    # Budget stop (ADR-023): once the run's ledger cost, in the pricing file's currency, reaches this
+    # value the proxy refuses to forward and the current step fails. None disables it.
+    budget: float | None = 5.0
 
 
 class TrainSettings(BaseModel):

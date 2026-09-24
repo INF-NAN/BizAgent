@@ -85,7 +85,7 @@ def test_gen_steps_get_a_placeholder_key_and_validation_none(
     plant(monkeypatch)
     fake = RecordingAwm()
     runner = SynthRunner(
-        Settings(synth={"out_dir": tmp_path / "synth"}),  # type: ignore[arg-type]
+        Settings(synth={"out_dir": tmp_path / "synth", "budget": None}),  # type: ignore[arg-type]
         tmp_path / "synth" / "r",
         scenarios=1,
         command_runner=fake,
@@ -117,7 +117,7 @@ def test_direct_gen_step_gets_llm_and_network_settings_only(
 
     plant(monkeypatch)
     runner = SynthRunner(
-        Settings(synth={"out_dir": tmp_path / "synth"}),  # type: ignore[arg-type]
+        Settings(synth={"out_dir": tmp_path / "synth", "budget": None}),  # type: ignore[arg-type]
         tmp_path / "synth" / "r",
         scenarios=1,
         environ=synth_environ(),
