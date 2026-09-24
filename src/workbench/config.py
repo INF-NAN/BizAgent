@@ -35,6 +35,8 @@ class EnvSettings(BaseModel):
     dataset_dir: Path = Path("data/awm1k")
     runs_dir: Path = Path("data/runs")
     host: str = "127.0.0.1"
+    # Hostname clients use to reach env servers (docker compose: the env-manager service name)
+    public_host: str | None = None
     port_min: int = 18100
     port_max: int = 18199
     max_envs: int = 4
@@ -80,6 +82,8 @@ class LLMSettings(BaseModel):
     temperature: float = 0.6
     max_tokens: int = 2048
     mock_fixture: Path = Path("tests/fixtures/trajectories/e_commerce_33_basic.jsonl")
+    # Demo only: rewind the mock script for every new session so the demo can be repeated.
+    mock_reset_per_session: bool = False
 
 
 class AgentSettings(BaseModel):

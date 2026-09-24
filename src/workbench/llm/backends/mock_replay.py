@@ -92,5 +92,8 @@ class MockReplayBackend:
         self._cursor += 1
         return turn
 
+    def reset(self) -> None:
+        self._cursor = 0
+
     async def aclose(self) -> None:
         return None

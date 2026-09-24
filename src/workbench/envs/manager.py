@@ -194,7 +194,7 @@ class EnvManager:
         initial_db = awm_adapter.copy_db(built, run_dir / "initial.db")
         work_db = awm_adapter.copy_db(built, run_dir / "work.db")
         port = self.ports.allocate()
-        url = f"http://{s.host}:{port}/mcp"
+        url = f"http://{s.public_host or s.host}:{port}/mcp"
         log_path = run_dir / "server.log"
         cmd = self._command(
             dataset_dir=s.dataset_dir,

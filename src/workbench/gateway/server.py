@@ -135,7 +135,7 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
         async with manager.run():
             yield
 
-    return Starlette(
+    app = Starlette(
         routes=[
             Route("/mcp", endpoint=_McpEndpoint(), methods=["GET", "POST", "DELETE"]),
             Route("/admin/sessions", register, methods=["POST"]),
@@ -144,3 +144,7 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
         ],
         lifespan=lifespan,
     )
+    # When mounted inside another app (the API), the parent must run this manager itself:
+    # Starlette does not run lifespans of mounted sub-apps.
+    app.state.session_manager = manager
+    return app
