@@ -161,3 +161,13 @@
   3. smoke 只演示"rollout → 奖励 → 更新"，使用 AgentFly 自带的 `calculator` 工具和 `math_equal_reward_tool`。
 - **决定**：选方案 3，并且不创建 `paper_mirror.yaml`。smoke 配置的 Hydra 键跟随固定 fork 的实际配置结构，并由 preflight 校验。把 AWM 环境接入训练的方案记在 `docs/IDEAS.md`。
 - **代价**：smoke 不接触 AWM 环境，只能证明训练链路能打通，与 AWM 本身无关。这一点在 LIMITATIONS 中有说明。
+
+## ADR-013 不做任何效果评测
+
+- **背景**：本仓库的定位是"怎么用、怎么部署、怎么管、怎么看"，被评测对象（Arctic-AWM 模型、AgentWorldModel-1K 数据与官方评测 harness）都来自上游。任务书 R1、R3 禁止跑评测和汇总比率。另外，本开发沙箱没有 GPU，也拿不到 HF 上的模型权重。
+- **可选方案**：
+  1. 在官方 harness 上复现论文数字（R1 禁止；需要 GPU 与评测 harness，违反 `mcp-adapted-bench` 永不使用的约定）；
+  2. 自建一小批任务，统计本应用层（网关、审批、守卫）带来的"效果变化"（R3 禁止；样本量和实验设计都不足以支撑结论，容易误导）；
+  3. 不做效果评测：论文数字只登记在 `results/registry.yaml` 并带来源与免责声明；应用层只描述机制，用单元测试和集成测试证明"机制按设计工作"，而不是"模型因此更好"。
+- **决定**：选方案 3。`make check-numbers` 扫描 README 与 docs，拦截未登记的百分比、两位小数分数与 Pass@k 数字，以及应用层效果措辞。`awm agent` / `awm verify` 最多各跑一次单任务，只用来证明链路打通。
+- **代价**：仓库无法回答"用了网关或审批之后任务完成得更好吗"。这个问题需要独立的实验设计（固定模型、固定任务集、足够样本、预注册指标），记在 `docs/IDEAS.md`，不在本仓库范围内。
