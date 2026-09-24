@@ -1,0 +1,45 @@
+# SMOKE profile — demonstrates one "rollout -> reward -> update" loop ONLY.
+# Rule R2: <=1.7B model, LoRA, <=5 steps, tiny batch; outputs are marked NO_RESULTS and must
+# never be used for any effectiveness claim. UNVERIFIED-LOCAL: needs Linux + CUDA GPU with the
+# train env installed (cd train && uv sync) and AgentFly's nested verl submodule initialized.
+#
+# It uses AgentFly's own built-in `calculator` tool and `math_equal_reward_tool`
+# (third_party/AgentFly/src/agentfly/tools/src/calculate/tools.py:6-9,
+#  src/agentfly/rewards/math_reward.py:492-495), so no untested plugin code is involved.
+# Hydra keys follow the pinned veRL fork config (docs/RECON.md §10 Phase 7), which differs
+# from AgentFly's examples/train_scripts/train_example.sh.
+profile: smoke
+no_results: true
+model: Qwen/Qwen3-0.6B
+model_size_b: 0.6
+train_files: configs/train/smoke_data.json
+val_files: configs/train/smoke_data.json
+overrides:
+  algorithm.adv_estimator: grpo
+  data.train_batch_size: 2
+  agent.init_config.agent_type: hf
+  agent.init_config.tools: "[calculator]"
+  agent.init_config.reward_name: math_equal_reward_tool
+  agent.init_config.max_model_len: 2048
+  agent.init_config.backend_config.backend: async_verl
+  agent.run_config.max_turns: 2
+  agent.run_config.num_chains: 2
+  agent.run_config.generation_config.max_tokens: 256
+  actor_rollout_ref.model.lora_rank: 8
+  actor_rollout_ref.model.lora_alpha: 16
+  actor_rollout_ref.model.target_modules: all-linear
+  actor_rollout_ref.actor.optim.lr: 1.0e-5
+  actor_rollout_ref.actor.ppo_mini_batch_size: 2
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu: 1
+  actor_rollout_ref.rollout.name: vllm
+  actor_rollout_ref.rollout.gpu_memory_utilization: 0.4
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu: 1
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu: 1
+  trainer.total_training_steps: 3
+  trainer.n_gpus_per_node: 1
+  trainer.nnodes: 1
+  trainer.logger: "['console']"
+  trainer.project_name: workbench_smoke
+  trainer.save_freq: -1
+  trainer.test_freq: -1
+  trainer.val_before_train: false
