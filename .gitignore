@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+train/.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets
+.env
+
+# Data, runs and model artifacts (never committed; see rule R6)
+data/
+outputs/
+*.db
+!tests/fixtures/**/*.db
