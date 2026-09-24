@@ -294,6 +294,45 @@ Saved verification result to data/p12/awm-agent/e_commerce_33_task_0/verify.sql.
 
 最后在 UI 的 Trajectory viewer 标签页用文件输入框加载这次的 `trajectory.json`，显示 "AWM trajectory · scenario e_commerce_33 · task 0 · 2 iterations" 和两个步骤。以上输出只证明链路打通，裁判的分类不构成评测，也不得汇总成比率。详见 `docs/verification/2026-09-24-llm-chain.md` §4–6。
 
+### 5.3 Phase 12.5 修复后的确认运行（单次链路演示，不构成评测）
+
+Phase 12.5 的第 1–5 项修复全部完成后，仓库主人追加授权再运行 1 次同一任务，只用来确认修复没有破坏链路。代码为提交 `f135189`，后端 `openai_compat`（DeepSeek `deepseek-flash`）。只设置 3.1 的环境变量，预算与 `max_tokens` 都用默认值（240000 / 8192，ADR-018），不再需要 5.1 的两个覆盖：
+
+```bash
+workbench agent run --scenario e_commerce_33 --approve auto --approver claude-code-operator \
+  "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under \$200 to my cart in quantity 1."
+```
+
+2026-09-24 18:37 UTC 的实际输出（节选；全文、trace、行级 diff 与审计见 `docs/verification/logs/2026-09-24-phase12.5-workbench-agent.log`）：
+
+```
+session 709b8875d89f: 39 tools from http://127.0.0.1:18100/mcp
+tool e_commerce_33__search_products -> ok (allowed)
+tool e_commerce_33__list_product_offers -> ok (allowed)
+approval_required e_commerce_33__get_or_create_active_cart
+approval_granted e_commerce_33__get_or_create_active_cart
+tool e_commerce_33__get_or_create_active_cart -> ok (allowed)
+approval_required e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool e_commerce_33__add_item_to_cart -> ok (allowed)
+memory_saved headphone_budget_ceiling
+memory_saved cart_id
+answer Done! Here's a summary: …
+{ "changed": true, ... "cart_items": { "rows_before": 3, "rows_after": 4, "added": [4], ... } }
+```
+
+链路再次走通：规划 → 两次读 → 两次写（均先审批）→ 回答 → verify。退出码为 0，7 次 LLM 调用，`tokens_used` 93736，没有触发任何终止条件。行级 diff 与 5.1 相同：只有 `cart_items` 新增 1 行（offer 1，数量 1），其余 18 张表不变。
+
+与 5.1 的差别，以及各项修复在这次运行中的表现（都是工程事实）：
+
+- 模型这次多调用了一次 `get_or_create_active_cart`。它是 GET 路由，名称中的动词 `create` 让它按名称就被判为 `write`（ADR-006 的启发式，不是 HTTP 方法下限），所以同样先审批；购物车 1 已存在，`carts` 表没有变化。
+- 审计摘要中的时间戳 `2026-09-24T18:37:39.267449` 保持原样，`[PHONE]` 出现 0 次（ADR-016）。
+- 每次 act 调用的 token 数为 14515–16675（5.1 为 25764–27741，ADR-018）。
+- 带 `tools` 的 act 调用都成功返回（ADR-017）。trace 不记录请求体，所以这次运行本身不能证明 `reasoning_content` 确实被回传了，回传由单测验证。
+- 官方 `e_commerce_33` 的 server 以白名单环境启动，39 个工具都能正常提供（ADR-019）。
+
+这次输出只证明修复后链路仍然打通，不代表任务完成得好不好，也不与 5.1 合并成任何比率。费用见 `docs/verification/cost-ledger.md` 第 6 行。
+
 阅读：
 
 - `src/workbench/agent/graph.py`、`agent/nodes/*.py`（尤其 `approve.py` 中的 `interrupt` 与恢复）；
