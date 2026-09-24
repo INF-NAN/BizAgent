@@ -14,6 +14,7 @@ from rich.table import Table
 from workbench.config import get_settings
 
 if TYPE_CHECKING:
+    from workbench.config import Settings
     from workbench.envs.service import RemoteEnvService
 
 
@@ -319,10 +320,39 @@ def _print_event(e: dict[str, Any]) -> None:
         console.print(f"[green]answer[/] {e['final_answer']}")
 
 
+def demo_settings() -> Settings:
+    """Offline demo: hand-written mini scenario + scripted mock LLM (query -> write -> approve)."""
+    from workbench.config import Settings
+
+    root = Path("data/demo")
+    return Settings(
+        env={"dataset_dir": Path("tests/fixtures/awm_mini"), "runs_dir": root / "runs"},  # type: ignore[arg-type]
+        gateway={"audit_path": root / "audit.jsonl"},  # type: ignore[arg-type]
+        llm={  # type: ignore[arg-type]
+            "backend": "mock_replay",
+            "mock_fixture": Path("tests/fixtures/trajectories/demo_query_write_approve.jsonl"),
+            "mock_reset_per_session": True,
+        },
+        agent={"checkpoint_db": root / "checkpoints.sqlite", "memory_db": root / "memory.sqlite"},  # type: ignore[arg-type]
+    )
+
+
 @api_app.command("serve")
-def api_serve() -> None:
-    """Run the HTTP API."""
-    _not_implemented(6)
+def api_serve(
+    demo: bool = typer.Option(False, "--demo", help="offline mock demo on the mini scenario"),
+) -> None:
+    """Run the HTTP API (+ gateway MCP at /gateway/mcp, UI at /ui/)."""
+    import uvicorn
+
+    from workbench.api.app import create_app
+
+    settings = demo_settings() if demo else get_settings()
+    if demo:
+        console.print(
+            f"[bold]demo mode[/]: open http://{settings.api.host}:{settings.api.port}/ui/ "
+            "and pick scenario mini_e_commerce"
+        )
+    uvicorn.run(create_app(settings), host=settings.api.host, port=settings.api.port)
 
 
 @synth_app.command("run")
