@@ -372,3 +372,54 @@
 - **代价**：
   - 手写场景代替了 `gen scenario` 的生成与去重，这一步没有执行，也没有得到验证（U9 中 `gen scenario` 的部分仍未验证）。
   - `local_` 前缀与"不以 `_<数字>` 结尾"是本仓库的约定，不是 AWM 的要求；后者依据的是当前官方数据的命名方式。
+
+## ADR-022 合成运行的中断与续跑：每个步骤独立成进程组，未完成的步骤从头重做
+
+- **背景**：
+  - Phase 13 的故意中断没有落在 gen 步骤中间（`docs/verification/2026-09-24-synth.md`）：
+    - 监视脚本把信号发给了外层包装 shell 的进程组 2548，而运行本身在 `setsid` 建立的进程组 2549；
+    - 改为手动 SIGTERM 时，6 个 gen 步骤都已完成，中断落在收尾的 `check_all`；
+    - `check_all` 的测试 server 和 `/tmp` 下的临时目录只能手动清理。
+  - 旧 runner 用 `subprocess.run` 在自己的进程组里启动步骤，由此产生三个问题：
+    - SIGTERM 只发给 runner 时，Python 的默认处理直接结束 runner，步骤进程继续运行；
+    - 终端 Ctrl-C 会发给整个前台进程组，runner 与 AWM 各自处理，结果取决于时机；
+    - AWM 用 `start_new_session=True` 启动它测试的 server（`awm/core/env.py:161-172`），这些 server 不在步骤的进程组里。只有正常路径上 AWM 自己用 `killpg` 回收它们（`:212-227`），步骤被杀后它们就成了孤儿。
+  - 续跑按步骤进行：runner 重做未完成的步骤，已付费的请求由代理缓存原样重放（ADR-011）。问题在于 AWM 各步骤写输出的方式不同：
+    - 6 个步骤都在结束时一次覆盖写出，见 `awm/core/scenario.py:629`、`task.py:142`、`db.py:259`、`sample.py:282`、`spec.py:120`、`env.py:568`；
+    - `gen verifier` 每处理一批就追加写入（`awm/core/verifier.py:172-176`）。它自带的续跑只重新生成校验不通过的行，新行追加在旧行后面（`:145-156`、`:260-308`、`:456`）；
+    - `awm verify` 取第一条匹配的行（`awm/tools.py:456-472`）。
+    - 所以 `gen verifier` 中途中断后直接重跑，排在前面的旧的无效行会被 `awm verify` 选中。
+- **可选方案**：
+  1. 只修正演示时的信号目标，runner 不变；
+  2. 由 runner 负责回收与重做：
+     - 每个步骤放进独立的进程组；
+     - 收到 SIGINT/SIGTERM 时，回收步骤及其全部后代所在的进程组；
+     - 重做未完成的步骤前，先移开它的输出。
+- **决定**：选方案 2，实现在 `src/workbench/synth/runner.py`、`src/workbench/envs/procs.py` 与 `src/workbench/cli.py`。
+  - **启动**：每个步骤以 `start_new_session=True` 启动，stdin 接 `/dev/null`，因此终端的 Ctrl-C 只会到达 runner。
+  - **信号**：`execute()` 运行期间把 SIGTERM 转成 `KeyboardInterrupt`，与 SIGINT 走同一条路径。
+  - **回收**（`stop_process_tree`）：
+    - 趁步骤进程还在，按 `/proc/<pid>/stat` 里的 ppid 建树，找出全部后代；
+    - 对这些进程所在的每个进程组先发 SIGTERM，最多等 5 秒，仍有存活的再发 SIGKILL；
+    - 永远不向 runner 自己所在的进程组发信号。
+  - **状态与退出码**：被中断的步骤记为 `interrupted`，CLI 以退出码 130 结束，用同一条命令续跑。收尾验证（`reset_db`、`check_all`）经同一个 runner 执行，中断时同样回收。
+  - **重做前移开输出**：
+    - 未完成的步骤重做前，已有的输出移到 `attempts/<步骤>.<n>/`（不删除），`state.json` 中该步记录 `set_aside`；
+    - 这样每次尝试都从没有输出的状态开始，结果与一次未中断的运行相同；
+    - 已经付费的请求由缓存重放。
+- **验证**：零成本，不调用付费 API。
+  - 单测 `tests/unit/test_synth_resilience.py`：
+    - 用真实子进程，假上游监听真实端口（`tests/unit/synth_harness.py`）；
+    - 向 runner 自己的 PID 发 SIGTERM，分别打断一次写出的步骤（`db`）和追加写出的步骤（`verifier`）；
+    - 断言中断落在步骤中间：该步已收到 1 个响应，第 2 个请求还在途；
+    - 断言该步在独立会话里启动的"测试 server"被回收；
+    - 断言续跑以 0 退出，每个请求只到达上游一次，中断前收到的响应由缓存命中，输出与未中断的运行相同。
+  - 反向对照：
+    - 旧 runner 在"server 已回收"这一条断言处失败；
+    - 去掉"移开输出"后，`verifier` 用例失败。
+  - 用真实 AWM 重做 Phase 13 的中断：见 `docs/verification/2026-09-24-phase14-synth-resilience.md`。
+- **代价**：
+  - 靠 `/proc` 找后代，只适用于 Linux。步骤一旦退出，它的子进程会被重新挂到别的父进程下，因此必须在步骤还在运行时回收；中断发生时步骤正在运行，满足这个条件。
+  - runner 自己被 SIGKILL 时无法回收。
+  - AWM 被 SIGTERM 结束时不执行 `finally`，`gen env` 与 `check_all` 的临时目录（`/tmp/env_test_*`，`awm/core/env.py:148`、`:230-235`）会残留，需要手动删除。
+  - 移开输出后，AWM 在 `gen env`、`gen verifier` 中自带的续跑不再起作用。请求正文与上次相同时由缓存重放；正文不同的请求会再次计费，并受 ADR-023 的预算约束。

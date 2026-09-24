@@ -409,7 +409,7 @@ def synth_run(
 
     from workbench.synth.ledger import Ledger
     from workbench.synth.proxy import create_proxy_app
-    from workbench.synth.runner import ProxyThread, SynthError, SynthRunner
+    from workbench.synth.runner import ProxyThread, SynthError, SynthInterrupted, SynthRunner
 
     settings = get_settings()
     try:
@@ -435,6 +435,9 @@ def synth_run(
         with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
             result = runner.execute(proxy_base=base)
         console.print_json(data=result)
+    except SynthInterrupted as exc:  # ADR-022: the step's processes are already stopped
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(code=130) from exc
     except SynthError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc

@@ -11,6 +11,10 @@ verifier mode. Rules enforced here:
   results back into its input (awm/core/scenario.py:642), which would otherwise modify the
   submodule (rule R5).
 - Output must live under ``data/synth/`` and the manifest says ``origin: local-synth`` (R2).
+- Each step runs in its own process group. SIGINT/SIGTERM stop that group and the groups of
+  everything the step started (AWM starts test servers in their own sessions, awm/core/env.py:
+  161-172), mark the step ``interrupted`` and exit; the same command resumes (ADR-022). A step
+  that did not finish starts again without its outputs: they are moved to ``attempts/`` first.
 - ``--scenario-file`` starts at `gen task` with a hand-written scenario file instead of running
   `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-021). `gen task`
   reads only each line's ``name`` and ``description`` (awm/core/task.py:44-45, 126).
@@ -23,16 +27,19 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from workbench.config import Settings
+from workbench.envs.procs import descendants, live_group_members
 from workbench.subprocess_env import LLM_VARS, NETWORK_VARS, generated_code_env, pick
 from workbench.synth.ledger import Ledger, load_prices
 from workbench.synth.validate import ValidationReport, parse_check_all
@@ -50,6 +57,10 @@ CommandRunner = Callable[[list[str], dict[str, str], Path], int]
 
 class SynthError(RuntimeError):
     """Invalid synthesis request or failed step."""
+
+
+class SynthInterrupted(SynthError):
+    """SIGINT/SIGTERM during a step or the validation; the same command resumes (ADR-022)."""
 
 
 @dataclass(frozen=True)
@@ -238,10 +249,69 @@ def plan_steps(
     return [s for s in steps if not (skip_scenario and s.name == "scenario")]
 
 
+def _pgid(pid: int) -> int | None:
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+
+
+def stop_process_tree(root: int, grace_s: float = 5.0) -> list[int]:
+    """Stop ``root``'s process group and the process groups of all its descendants (ADR-022).
+
+    AWM starts the servers it tests in their own sessions (awm/core/env.py:161-172), so they are
+    not in the step's group; they are found through the process tree while ``root`` still runs.
+    Our own process group is never signalled. Returns the groups that were signalled.
+    """
+    own = os.getpgrp()
+    groups = sorted({g for g in map(_pgid, [root, *descendants(root)]) if g is not None and g != own})
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for group in groups:
+            with suppress(ProcessLookupError):
+                os.killpg(group, sig)
+        deadline = time.monotonic() + grace_s
+        while time.monotonic() < deadline and any(live_group_members(g) for g in groups):
+            time.sleep(0.1)
+        if not any(live_group_members(g) for g in groups):
+            break
+    return groups
+
+
 def default_command_runner(argv: list[str], env: dict[str, str], log_path: Path) -> int:
+    """Run one step in its own process group; if interrupted, stop it and what it started."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("ab") as log:
-        return subprocess.run(argv, env=env, stdout=log, stderr=subprocess.STDOUT, check=False).returncode
+        proc = subprocess.Popen(
+            argv,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,  # its own process group, see stop_process_tree
+        )
+        try:
+            return proc.wait()
+        except BaseException:
+            stop_process_tree(proc.pid)
+            proc.wait()
+            raise
+
+
+def _raise_interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
+@contextmanager
+def interruptible() -> Iterator[None]:
+    """Turn SIGTERM into KeyboardInterrupt (like SIGINT) while a run executes, so both clean up."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.signal(signal.SIGTERM, _raise_interrupt)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 class SynthRunner:
@@ -381,39 +451,84 @@ class SynthRunner:
             env.update(pick(self._environ, LLM_VARS + NETWORK_VARS))
         return env
 
+    def _set_aside(self, step: str) -> str | None:
+        """Move outputs left by an unfinished attempt of ``step`` to attempts/<step>.<n>/.
+
+        Every attempt of a step starts without its outputs, so a rerun produces what an
+        uninterrupted run would. This matters for `gen verifier`: it appends to its output
+        (awm/core/verifier.py:172-176) and re-generates the rows that do not validate, while
+        `awm verify` takes the first matching row (awm/tools.py:456-472), so a stale row would
+        shadow the new one. Requests the earlier attempt already made are served by the proxy
+        cache. Nothing is deleted; returns the directory relative to the run, or None.
+        """
+        plan = next(s for s in self.plan if s.name == step)
+        stale = [o for o in plan.outputs if (self.run_dir / o).exists()]
+        if not stale:
+            return None
+        n = 1
+        while (self.run_dir / "attempts" / f"{step}.{n}").exists():
+            n += 1
+        dest = self.run_dir / "attempts" / f"{step}.{n}"
+        dest.mkdir(parents=True)
+        for name in stale:
+            (self.run_dir / name).rename(dest / name)
+        return str(dest.relative_to(self.run_dir))
+
     def execute(self, proxy_base: str | None = None, validate: bool = True) -> dict[str, Any]:
         missing = [k for k in self.required_env if not self._environ.get(k)]
         if missing:
             raise SynthError(f"--execute needs {', '.join(missing)} (see .env.example)")
+        currency, prices = load_prices(self.settings.synth.pricing_file)
         self._prepare()
         state = RunState.load(self.state_path)
-        for step in self.plan:
-            done = state.steps.get(step.name, {}).get("status") == "done"
-            if done and all((self.run_dir / o).exists() for o in step.outputs):
-                continue  # checkpoint: resume after the last completed step
-            started = time.time()
-            rc = self._run(
-                step.argv, self.step_env(step.name, proxy_base), self.run_dir / "logs" / f"{step.name}.log"
+        with interruptible():
+            for step in self.plan:
+                done = state.steps.get(step.name, {}).get("status") == "done"
+                if done and all((self.run_dir / o).exists() for o in step.outputs):
+                    continue  # checkpoint: resume after the last completed step
+                aside = {"set_aside": moved} if (moved := self._set_aside(step.name)) else {}
+                started = time.time()
+                try:
+                    rc = self._run(
+                        step.argv,
+                        self.step_env(step.name, proxy_base),
+                        self.run_dir / "logs" / f"{step.name}.log",
+                    )
+                except KeyboardInterrupt as exc:
+                    state.steps[step.name] = {
+                        "status": "interrupted",
+                        "returncode": None,
+                        "seconds": round(time.time() - started, 1),
+                        **aside,
+                    }
+                    state.save(self.state_path)
+                    raise SynthInterrupted(
+                        f"interrupted during step {step.name}; run the same command again to resume"
+                    ) from exc
+                ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs)
+                state.steps[step.name] = {
+                    "status": "done" if ok else "failed",
+                    "returncode": rc,
+                    "seconds": round(time.time() - started, 1),
+                    **aside,
+                }
+                state.save(self.state_path)
+                if not ok:
+                    raise SynthError(
+                        f"step {step.name} failed (rc={rc}); see {self.run_dir / 'logs' / step.name}.log"
+                    )
+            result: dict[str, Any] = {"steps": state.steps}
+            result["ledger"] = self.ledger.summary(prices, currency)
+            (self.run_dir / "ledger_summary.json").write_text(
+                json.dumps(result["ledger"], indent=2), encoding="utf-8"
             )
-            ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs)
-            state.steps[step.name] = {
-                "status": "done" if ok else "failed",
-                "returncode": rc,
-                "seconds": round(time.time() - started, 1),
-            }
-            state.save(self.state_path)
-            if not ok:
-                raise SynthError(
-                    f"step {step.name} failed (rc={rc}); see {self.run_dir / 'logs' / step.name}.log"
-                )
-        result: dict[str, Any] = {"steps": state.steps}
-        currency, prices = load_prices(self.settings.synth.pricing_file)
-        result["ledger"] = self.ledger.summary(prices, currency)
-        (self.run_dir / "ledger_summary.json").write_text(
-            json.dumps(result["ledger"], indent=2), encoding="utf-8"
-        )
-        if validate:
-            result["validation"] = self.validate().as_dict()
+            if validate:
+                try:
+                    result["validation"] = self.validate().as_dict()
+                except KeyboardInterrupt as exc:
+                    raise SynthInterrupted(
+                        "interrupted during the validation; run the same command again to redo it"
+                    ) from exc
         return result
 
     def validate(self) -> ValidationReport:
