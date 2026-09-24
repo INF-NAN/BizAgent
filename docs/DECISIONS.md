@@ -342,7 +342,7 @@
 - **代价与未验证项（UNVERIFIED-LOCAL，留到 Phase 15 在 GPU 上验证）**：
   - 以上都是读源码得到的结论，没有在真实服务上运行过。
   - 没有设置 reasoning parser，思考内容（`<think>…</think>`）留在 `content` 中，由 workbench 客户端去掉。如果模型在思考内容里写出了 `<tool_call>` 标签，parser 会把它当成工具调用；`qwen3` reasoning parser 可以把思考内容分出去，但不在 D11 的范围内，也未验证。
-  - `docker-compose.yml` 的 `vllm` 服务命令是写死的（第 54 行），不读 profile，仍然没有这两个参数。按 D11 只改 profile 与 serve 脚本，未改 compose；compose 中的 vLLM 服务需要同样的处理才能服务 act 请求（LIMITATIONS U1）。
+  - `docker-compose.yml` 的 `vllm` 服务命令是写死的，不读 profile。按 D11 当时只改了 profile 与 serve 脚本。2026-09-24 仓库主人授权同步（`user-decisions.md` D16）：compose 的命令现在与 `workbench serve vllm-cmd` 的输出一致，只有 `--host` 为 `0.0.0.0`，以便其它容器访问；同时补上了 `--served-model-name`。`tests/unit/test_llm_client.py::test_compose_vllm_matches_the_serving_profile` 断言两者一致，防止再次漂移。
 
 ## ADR-021 合成流水线可以从 `gen task` 开始（`--scenario-file`）
 

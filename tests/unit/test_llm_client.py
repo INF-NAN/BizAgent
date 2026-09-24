@@ -285,3 +285,20 @@ def test_serving_profile_command() -> None:
         "--reasoning-parser",
         "qwen3",
     ]
+
+
+def test_compose_vllm_matches_the_serving_profile() -> None:
+    """D16: docker-compose's vllm service must not drift from the serving profile (ADR-020)."""
+    from pathlib import Path
+
+    import yaml
+
+    from workbench.llm.serving import ServingProfile, vllm_command
+
+    profile = ServingProfile.load(Path("configs/serving/arctic-awm-4b.yaml"))
+    expected = vllm_command(profile)[1:]  # the compose entrypoint is `vllm`
+    expected[expected.index("--host") + 1] = "0.0.0.0"  # reachable from the other containers
+    service = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))["services"]["vllm"]
+    assert service["entrypoint"] == ["vllm"]
+    assert service["command"] == expected
+    assert service["image"] == "vllm/vllm-openai:v0.19.0"  # the version the profile was checked against
