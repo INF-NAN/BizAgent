@@ -274,9 +274,9 @@ class SynthRunner:
                 {
                     "AWM_SYN_LLM_PROVIDER": "openai",
                     "OPENAI_BASE_URL": base,
-                    "OPENAI_API_KEY": "workbench-proxy",
+                    "OPENAI_API_KEY": "workbench-proxy",  # pragma: allowlist secret
                     "EMBEDDING_OPENAI_BASE_URL": base,
-                    "EMBEDDING_OPENAI_API_KEY": "workbench-proxy",
+                    "EMBEDDING_OPENAI_API_KEY": "workbench-proxy",  # pragma: allowlist secret
                 }
             )
         return env

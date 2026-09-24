@@ -26,9 +26,9 @@ DEFAULT_CONFIG_FILE = Path("configs/app.yaml")
 
 class UpstreamSettings(BaseModel):
     awm_dir: Path = Path("third_party/agent-world-model")
-    awm_sha: str = "85e322f69279e3b3325b7377ec3bab788514e9cb"
+    awm_sha: str = "85e322f69279e3b3325b7377ec3bab788514e9cb"  # pragma: allowlist secret
     agentfly_dir: Path = Path("third_party/AgentFly")
-    agentfly_sha: str = "1256586b1109ba8e0dc0f179f8515b4567d09df4"
+    agentfly_sha: str = "1256586b1109ba8e0dc0f179f8515b4567d09df4"  # pragma: allowlist secret
 
 
 class EnvSettings(BaseModel):

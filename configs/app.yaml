@@ -20,7 +20,7 @@ llm:
   backend: mock_replay           # mock_replay | vllm | openai_compat
   model: Snowflake/Arctic-AWM-4B
   base_url: http://127.0.0.1:8000/v1
-  api_key_env: OPENAI_API_KEY
+  api_key_env: OPENAI_API_KEY  # pragma: allowlist secret
   connect_timeout_s: 5
   read_timeout_s: 60
   total_timeout_s: 180

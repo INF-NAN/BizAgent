@@ -94,7 +94,8 @@ def test_step_env_points_awm_at_proxy(tmp_path: Path) -> None:
     env = r.step_env("task", "http://127.0.0.1:9")
     assert env["OPENAI_BASE_URL"] == "http://127.0.0.1:9/step/task/v1"
     assert env["AWM_SYN_LLM_PROVIDER"] == "openai" and env["AWM_SYN_OVERRIDE_MODEL"] == "m"
-    assert env["OPENAI_API_KEY"] == "workbench-proxy"  # the real key stays in the proxy only
+    # the real key stays in the proxy only
+    assert env["OPENAI_API_KEY"] == "workbench-proxy"  # pragma: allowlist secret
 
 
 def test_ledger_costs(tmp_path: Path) -> None:
@@ -125,7 +126,7 @@ def test_proxy_caches_retries_and_records(tmp_path: Path) -> None:
     ledger = Ledger(tmp_path / "ledger.jsonl")
     app = create_proxy_app(
         upstream_base_url="http://up/v1",
-        upstream_api_key="secret",
+        upstream_api_key="secret",  # pragma: allowlist secret
         cache_dir=tmp_path / "cache",
         ledger=ledger,
         backoff_s=0.0,
