@@ -1,0 +1,3 @@
+{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "e_commerce_33 (tool names per OpenEnv capture @e401886, see docs/RECON.md §1.6; not yet verified against the official dataset)", "purpose": "unit tests of mock_replay: one tool call then a final answer"}
+{"content": "", "tool_calls": [{"id": "call_1", "name": "search_products", "arguments": {"query": "wireless noise cancelling headphones", "sort_by": "rating"}}], "usage": {"prompt_tokens": 120, "completion_tokens": 18}}
+{"content": "The top-rated match is 'Wireless Noise Cancelling Headphones B'.", "usage": {"prompt_tokens": 260, "completion_tokens": 22}}

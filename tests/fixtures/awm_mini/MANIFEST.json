@@ -1,0 +1,7 @@
+{
+  "origin": "hand-written-fixture",
+  "official_data": false,
+  "scenarios": [
+    "mini_e_commerce"
+  ]
+}
