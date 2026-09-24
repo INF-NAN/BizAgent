@@ -1,0 +1,37 @@
+# BizAgent Workbench application config (Phase 1). Every value can be overridden by
+# environment variables, e.g. WORKBENCH_LLM__BACKEND=vllm or WORKBENCH_ENV__MAX_ENVS=8.
+env:
+  dataset_dir: data/awm1k        # official AgentWorldModel-1K (downloaded by `make data`)
+  runs_dir: data/runs            # per-session isolated copies (DBs, logs, snapshots)
+  host: 127.0.0.1
+  port_min: 18100
+  port_max: 18199
+  max_envs: 4
+  queue_timeout_s: 60
+  start_timeout_s: 60
+  health_timeout_s: 10
+  idle_timeout_s: 600
+gateway:
+  policy_file: configs/tool_policy.yaml
+  audit_path: data/audit/gateway.jsonl
+  upstream_timeout_s: 30
+  port: 8081
+llm:
+  backend: mock_replay           # mock_replay | vllm | openai_compat
+  model: Snowflake/Arctic-AWM-4B
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: OPENAI_API_KEY
+  connect_timeout_s: 5
+  read_timeout_s: 60
+  total_timeout_s: 180
+  max_retries: 3
+agent:
+  max_steps: 12
+  repeat_call_threshold: 3
+  no_change_threshold: 4
+  token_budget: 60000
+  wall_clock_s: 300
+api:
+  host: 127.0.0.1
+  port: 8080
+  max_sessions: 4
