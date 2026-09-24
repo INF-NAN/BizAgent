@@ -356,15 +356,95 @@ def api_serve(
 
 
 @synth_app.command("run")
-def synth_run() -> None:
-    """Plan or execute an AWM synthesis run."""
-    _not_implemented(7)
+def synth_run(
+    scenarios: int = typer.Option(..., "--scenarios", help="number of scenarios to synthesize"),
+    out: Path = typer.Option(..., "--out", help="run directory under data/synth/"),
+    num_tasks: int = typer.Option(10, "--num-tasks"),
+    verifier_mode: str = typer.Option("sql", "--verifier-mode"),
+    execute: bool = typer.Option(False, "--execute", help="actually call the LLM API (default: dry-run)"),
+) -> None:
+    """Plan (default) or execute AWM's gen steps with checkpoints, LLM cache, ledger and validation."""
+    import os
+
+    from workbench.synth.ledger import Ledger
+    from workbench.synth.proxy import create_proxy_app
+    from workbench.synth.runner import ProxyThread, SynthError, SynthRunner
+
+    settings = get_settings()
+    try:
+        runner = SynthRunner(
+            settings, out, scenarios=scenarios, num_tasks=num_tasks, verifier_mode=verifier_mode
+        )
+        if not execute:
+            console.print_json(data=runner.describe())
+            return
+        s = settings.synth
+        upstream = os.environ.get(s.upstream_base_url_env) or "https://api.openai.com/v1"
+        app = create_proxy_app(
+            upstream_base_url=upstream,
+            upstream_api_key=os.environ.get(s.upstream_api_key_env),
+            cache_dir=out / "llm_cache",
+            ledger=Ledger(out / "ledger.jsonl"),
+        )
+        with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
+            result = runner.execute(proxy_base=base)
+        console.print_json(data=result)
+    except SynthError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@synth_app.command("validate")
+def synth_validate(run_dir: Path) -> None:
+    """Run `awm env reset_db` + `awm env check_all` on a synthesized run and write the report."""
+    import os
+
+    from workbench.synth.runner import default_command_runner, validate_run
+
+    env = dict(os.environ)
+    env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
+    report = validate_run(run_dir, default_command_runner, env)
+    console.print_json(data=report.as_dict())
 
 
 @train_app.command("preflight")
-def train_preflight() -> None:
-    """Check the training environment."""
-    _not_implemented(7)
+def train_preflight(profile: Path | None = typer.Option(None, "--profile")) -> None:
+    """Check GPU, CUDA/torch/vLLM/veRL, config keys and data for the smoke profile."""
+    from workbench.doctor import exit_code
+    from workbench.train.preflight import run_preflight
+    from workbench.train.profile import TrainProfile
+
+    s = get_settings()
+    results = run_preflight(
+        TrainProfile.load(profile or s.train.smoke_config), s.upstream.agentfly_dir, s.train.project_dir
+    )
+    table = Table(title="train preflight (smoke)")
+    for col in ("check", "status", "detail"):
+        table.add_column(col)
+    for r in results:
+        table.add_row(r.name, r.status, r.detail)
+    console.print(table)
+    raise typer.Exit(code=exit_code(results))
+
+
+@train_app.command("launch")
+def train_launch(
+    profile: Path | None = typer.Option(None, "--profile"),
+    execute: bool = typer.Option(False, "--execute", help="run it (needs a GPU); default prints the plan"),
+) -> None:
+    """Launch the SMOKE profile in the separate train env (subprocess). Output is marked NO_RESULTS."""
+    from workbench.train.launch import LaunchError, launch
+    from workbench.train.preflight import run_preflight
+    from workbench.train.profile import TrainProfile
+
+    s = get_settings()
+    prof = TrainProfile.load(profile or s.train.smoke_config)
+    checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir)
+    try:
+        console.print_json(data=launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute))
+    except LaunchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
 
 @results_app.command("check")

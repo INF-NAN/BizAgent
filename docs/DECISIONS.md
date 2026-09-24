@@ -137,3 +137,27 @@
 - **代价**：
   - 来源标记由模型自己填写，门槛只能拦住它自己承认是推断的内容，无法防止模型谎报来源；
   - `SqliteStore` 的过期判断只精确到秒（RECON §10 Phase 5）。
+
+## ADR-011 自合成环境与官方数据严格隔离
+
+- **背景**：R2 禁止改动 AgentWorldModel-1K。此外，AWM 的 `gen scenario` 会把结果写回输入的种子文件（`scenario.py:642`），`env start` 默认会往数据集目录写临时文件（`server.py:134-138`）。
+- **可选方案**：
+  1. 直接在 `data/awm1k/` 或 AWM 的 `outputs/` 里跑合成；
+  2. 每次运行使用独立目录，放在 `data/synth/<run_id>/`。
+- **决定**：选方案 2。
+  - 输出目录必须位于 `data/synth/` 之下，否则直接报错；
+  - 种子文件先复制进运行目录再使用；
+  - `manifest.json` 标记 `origin: local-synth`、`official_data: false`；
+  - 默认只做 dry-run，只有显式加 `--execute` 并且 LLM 相关环境变量齐全才真正执行。
+  - LLM 请求经本地代理转发，顺带实现缓存、重试和按步骤记账。真实 API key 只由代理持有，AWM 子进程拿到的是占位 key。
+- **代价**：多了一层本地代理；AWM 自身的重试和代理的重试会叠加。
+
+## ADR-012 不创建 `paper_mirror`；smoke 使用 AgentFly 内置的工具和奖励
+
+- **背景**：Phase 0 结论为 (b)，没有可以镜像的官方配方。AgentFly 的工具和奖励靠 import 时注册，在 Ray worker 中加载外部插件的行为，在没有 GPU 的情况下无法验证。
+- **可选方案**：
+  1. 按论文文字自己"复刻"一个配方（R2 与任务书明令禁止）；
+  2. 写一个 AWM 工具和奖励插件（不可验证，容易变成伪装可用，违反 R8）；
+  3. smoke 只演示"rollout → 奖励 → 更新"，使用 AgentFly 自带的 `calculator` 工具和 `math_equal_reward_tool`。
+- **决定**：选方案 3，并且不创建 `paper_mirror.yaml`。smoke 配置的 Hydra 键跟随固定 fork 的实际配置结构，并由 preflight 校验。把 AWM 环境接入训练的方案记在 `docs/IDEAS.md`。
+- **代价**：smoke 不接触 AWM 环境，只能证明训练链路能打通，与 AWM 本身无关。这一点在 LIMITATIONS 中有说明。
