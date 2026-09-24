@@ -1,0 +1,6 @@
+.venv
+train/.venv
+data
+.cache
+**/__pycache__
+.git

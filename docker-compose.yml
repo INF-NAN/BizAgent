@@ -1,0 +1,65 @@
+# docker compose config   -> validates this file (Phase 6 acceptance)
+# docker compose up       -> app + env-manager (CPU, mock LLM by default)
+# docker compose --profile gpu up vllm   -> Arctic-AWM on vLLM (UNVERIFIED-LOCAL: needs NVIDIA GPU)
+services:
+  env-manager:
+    build: .
+    command: ["uv", "run", "--no-sync", "workbench", "env", "serve"]
+    init: true   # reap zombies of killed AWM server process groups (see ADR-004)
+    environment:
+      WORKBENCH_ENV__MANAGER_HOST: 0.0.0.0
+      WORKBENCH_ENV__HOST: 0.0.0.0
+      WORKBENCH_ENV__PUBLIC_HOST: env-manager
+      WORKBENCH_ENV__DATASET_DIR: /data/awm1k
+      WORKBENCH_ENV__RUNS_DIR: /data/runs
+    volumes:
+      - ./data:/data
+    expose:
+      - "8090"
+      - "18100-18199"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz')"]
+      interval: 10s
+      retries: 5
+
+  app:
+    build: .
+    command: ["uv", "run", "--no-sync", "workbench", "api", "serve"]
+    init: true
+    depends_on:
+      env-manager:
+        condition: service_healthy
+    environment:
+      WORKBENCH_API__HOST: 0.0.0.0
+      WORKBENCH_ENV__MANAGER_URL: http://env-manager:8090
+      WORKBENCH_ENV__DATASET_DIR: /data/awm1k
+      WORKBENCH_ENV__RUNS_DIR: /data/runs
+      WORKBENCH_AGENT__CHECKPOINT_DB: /data/agent/checkpoints.sqlite
+      WORKBENCH_AGENT__MEMORY_DB: /data/agent/memory.sqlite
+      WORKBENCH_GATEWAY__AUDIT_PATH: /data/audit/gateway.jsonl
+      WORKBENCH_LLM__BACKEND: ${WORKBENCH_LLM__BACKEND:-mock_replay}
+      WORKBENCH_LLM__BASE_URL: ${WORKBENCH_LLM__BASE_URL:-http://vllm:8000/v1}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/data
+    ports:
+      - "8080:8080"
+
+  vllm:
+    profiles: ["gpu"]
+    image: vllm/vllm-openai:v0.19.0
+    entrypoint: ["vllm"]   # explicit: do not rely on the image default (unverified)
+    command: ["serve", "Snowflake/Arctic-AWM-4B", "--host", "0.0.0.0", "--port", "8000", "--gpu-memory-utilization", "0.9"]
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
