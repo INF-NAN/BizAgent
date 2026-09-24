@@ -20,9 +20,11 @@ from workbench.obs.tracing import TraceHub
 
 FIX = Path("tests/fixtures/trajectories")
 SCENARIO = "mini_e_commerce"
+# (product id, title, offer id, price, average rating); response shapes follow the official
+# e_commerce_33 tools (docs/verification/2026-09-24-fixture-reconciliation.md)
 PRODUCTS = [
-    {"id": 1, "title": "Wireless Noise Cancelling Headphones A", "price": 189.0, "rating": 4.7},
-    {"id": 2, "title": "Wireless Noise Cancelling Headphones B", "price": 249.0, "rating": 4.8},
+    (1, "Wireless Noise Cancelling Headphones A", 11, 189.0, 4.7),
+    (2, "Wireless Noise Cancelling Headphones B", 12, 249.0, 4.8),
 ]
 
 
@@ -50,17 +52,26 @@ class MiniUpstream:
         self.calls.append((name, arguments))
         if name == "search_products":
             q = str(arguments.get("query", "")).lower()
-            hits = [p for p in PRODUCTS if q and q in p["title"].lower()]
+            hits = [p for p in PRODUCTS if q and q in p[1].lower()]
             if "max_price" in arguments:
-                hits = [p for p in hits if p["price"] <= arguments["max_price"]]
-            return False, json.dumps(sorted(hits, key=lambda p: -p["rating"]))
+                hits = [p for p in hits if p[3] <= arguments["max_price"]]
+            items = [
+                {
+                    "product": {"id": pid, "title": title},
+                    "aggregates": {"product_id": pid, "average_rating": rating},
+                    "lowest_active_offer": {"id": oid, "product_id": pid, "price": price, "currency": "USD"},
+                }
+                for pid, title, oid, price, rating in sorted(hits, key=lambda p: -p[4])
+            ]
+            return False, json.dumps({"products": items, "total": len(items)})
         if name == "add_item_to_cart":
-            return False, json.dumps({"id": 2, **arguments})
+            return False, json.dumps({"cart_item": {"id": 2, "cart_id": 1, **arguments}})
         if name == "list_user_payment_methods":
-            return False, json.dumps([{"id": 1, "brand": "visa"}, {"id": 2, "brand": "mastercard"}])
+            methods = [{"id": 1, "card_brand": "Visa"}, {"id": 2, "card_brand": "MasterCard"}]
+            return False, json.dumps({"payment_methods": methods})
         if name == "delete_user_payment_method":
-            return False, json.dumps({"deleted_id": arguments.get("payment_method_id")})
-        return False, "[]"
+            return False, json.dumps({"success": True})
+        return False, json.dumps({"items": []})
 
 
 async def make_runner(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 import pytest
@@ -25,8 +26,10 @@ async def test_real_awm_env_list_tools_and_clean_stop(manager: EnvManager) -> No
         await s.initialize()
         listed = await s.list_tools()
         assert {t.name for t in listed.tools} == set(h.tools)
-        res = await s.call_tool("search_products", {"query": "Headphones", "sort_by": "price"})
-        assert not res.isError and "Wired Headphones C" in res.content[0].text
+        res = await s.call_tool("search_products", {"query": "Headphones", "sort_by": "price_asc"})
+        assert not res.isError
+        body = json.loads(res.content[0].text)
+        assert body["total"] == 3 and body["products"][0]["product"]["title"] == "Wired Headphones C"
 
     # AWM artifacts land in the session dir, never next to the dataset (RECON §1.2)
     assert (h.run_dir / "temp_server.py").exists()
@@ -46,7 +49,7 @@ async def test_write_shows_up_in_db_diff(manager: EnvManager) -> None:
     h = await manager.start("mini_e_commerce", session_id="int2")
     async with streamablehttp_client(h.url) as (r, w, _), ClientSession(r, w) as s:
         await s.initialize()
-        res = await s.call_tool("add_item_to_cart", {"product_id": 1, "quantity": 1})
+        res = await s.call_tool("add_item_to_cart", {"product_offer_id": 11, "quantity": 1})
         assert not res.isError
     d = manager.diff("int2")
     assert d.tables["cart_items"].added == [2]

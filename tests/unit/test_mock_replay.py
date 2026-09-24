@@ -12,7 +12,7 @@ async def test_replays_in_order_with_tool_calls() -> None:
     assert "手写夹具" in b.header["_fixture"]
     first = await b.chat([{"role": "user", "content": "hi"}])
     assert first.tool_calls[0].name == "search_products"
-    assert first.tool_calls[0].arguments["sort_by"] == "rating"
+    assert first.tool_calls[0].arguments["sort_by"] == "average_rating"
     assert first.usage.total_tokens == 138
     second = await b.chat([])
     assert second.tool_calls == []

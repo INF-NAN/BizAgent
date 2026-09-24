@@ -15,7 +15,7 @@ async def test_normal_completion(tmp_path: Path) -> None:
     done = events[-1]
     assert done["type"] == "done" and done["termination"] is None
     assert "Headphones B" in done["final_answer"]
-    assert up.calls == [("search_products", {"query": "Headphones", "sort_by": "rating"})]
+    assert up.calls == [("search_products", {"query": "Headphones", "sort_by": "average_rating"})]
     assert "tool_call" in types(events) and "approval_required" not in types(events)
     assert deps.llm.usage.total_tokens > 0
 
@@ -29,7 +29,7 @@ async def test_write_needs_approval_and_is_approved(tmp_path: Path) -> None:
     assert first[-1]["tool"] == "mini_e_commerce__add_item_to_cart" and first[-1]["risk"] == "write"
     assert [c[0] for c in up.calls] == ["search_products"]  # write not executed yet
     pending = await runner.pending_approval("t2")
-    assert pending is not None and pending["arguments"] == {"product_id": 1, "quantity": 1}
+    assert pending is not None and pending["arguments"] == {"product_offer_id": 11, "quantity": 1}
 
     second = await collect(runner.resume("t2", "s1", {"approved": True, "approver": "alice"}))
     assert [c[0] for c in up.calls] == ["search_products", "add_item_to_cart"]

@@ -1,4 +1,4 @@
-{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "e_commerce_33 base tool names (OpenEnv capture, see docs/RECON.md §1.6); prefixed with the demo scenario mini_e_commerce", "purpose": "Phase 5 e2e: invalid plans are fed back and retried (max 2 retries)"}
+{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "tool names and argument names of the official e_commerce_33 environment (AgentWorldModel-1K @ dde80a0, CC-BY-4.0; reconciled 2026-09-24, docs/verification/2026-09-24-fixture-reconciliation.md); prefixed with the demo scenario mini_e_commerce", "purpose": "Phase 5 e2e: invalid plans are fed back and retried (max 2 retries)"}
 {"content": "I think we should just search for it.", "usage": {"prompt_tokens": 300, "completion_tokens": 10}}
 {"content": "{\"steps\": []}", "usage": {"prompt_tokens": 350, "completion_tokens": 5}}
 {"content": "{\"steps\": [{\"description\": \"Answer directly\", \"tool\": null, \"changes_data\": false}]}", "usage": {"prompt_tokens": 400, "completion_tokens": 20}}

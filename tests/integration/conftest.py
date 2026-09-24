@@ -1,6 +1,6 @@
 """Integration fixtures: real AWM MCP server subprocesses on CPU using the hand-written mini
-dataset (tests/fixtures/awm_mini — NOT official data; the official dataset cannot be
-downloaded in the development sandbox, see docs/LIMITATIONS.md)."""
+dataset (tests/fixtures/awm_mini — NOT official data). Tests against the official dataset
+live in test_official_data.py and skip when data/awm1k is absent (CI)."""
 
 from __future__ import annotations
 

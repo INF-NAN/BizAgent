@@ -3,5 +3,15 @@
   "official_data": false,
   "scenarios": [
     "mini_e_commerce"
-  ]
+  ],
+  "interface_reconciled_with": {
+    "dataset": "Snowflake/AgentWorldModel-1K",
+    "revision": "dde80a0283fe781bdc51656bce57063dc5650213",
+    "scenario": "e_commerce_33",
+    "license": "CC-BY-4.0",
+    "attribution": "AgentWorldModel-1K by Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, Zhewei Yao, Huaxiu Yao, Yuxiong He; https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K",
+    "taken_from_official": "names of 7 tools; their parameter names and required-ness; top-level response field names; table names products, product_offers, carts, cart_items, payment_methods",
+    "changes": "code written from scratch and simplified: fewer parameters, tables and columns; product_aggregates reduced to average_rating; sample rows, tasks and verifier are invented",
+    "evidence": "docs/verification/2026-09-24-fixture-reconciliation.md"
+  }
 }

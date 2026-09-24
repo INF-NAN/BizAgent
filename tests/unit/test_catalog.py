@@ -9,7 +9,7 @@ def test_catalog_counts_from_dataset_files() -> None:
     cat = build_catalog(MINI)
     assert [s.name for s in cat] == ["mini_e_commerce"]
     s = cat[0]
-    assert s.tools == 7 and s.tasks == 2 and s.tables == 3
+    assert s.tools == 7 and s.tasks == 2 and s.tables == 6
     assert "add_item_to_cart" in s.tool_names
 
 

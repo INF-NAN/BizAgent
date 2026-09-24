@@ -50,7 +50,7 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
             assert "mini_e_commerce__delete_user_payment_method" in names
 
             read = await s.call_tool("mini_e_commerce__list_user_payment_methods", {})
-            assert not read.isError and "mastercard" in read.content[0].text
+            assert not read.isError and "MasterCard" in read.content[0].text
 
             denied = await s.call_tool(
                 "mini_e_commerce__delete_user_payment_method", {"payment_method_id": 2}
@@ -59,12 +59,14 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
             body = json.loads(denied.content[0].text)
             assert body["status"] == "denied" and body["decision"] == "approval_required"
 
-            bad = await s.call_tool("mini_e_commerce__search_products", {"query": "x", "sort_by": "bogus"})
+            # the official e_commerce_33 tools have no enum parameters; a type error is the
+            # validation failure they actually produce (docs/verification/2026-09-24-dataset.md)
+            bad = await s.call_tool("mini_e_commerce__get_product_by_id", {"product_id": "abc"})
             err = json.loads(bad.content[0].text)["error"]
-            assert err["code"] == "invalid_arguments" and err["details"]["allowed_values"] == [
-                "price",
-                "rating",
-            ]
+            assert err["code"] == "invalid_arguments" and err["details"]["expected_type"] == "'integer'"
+
+            missing = await s.call_tool("mini_e_commerce__get_product_by_id", {})
+            assert json.loads(missing.content[0].text)["error"]["details"]["missing_fields"] == ["product_id"]
 
             empty = await s.call_tool("mini_e_commerce__search_products", {"query": "no-such-product"})
             assert not empty.isError and empty.structuredContent == {
