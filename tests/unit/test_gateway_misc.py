@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from workbench.gateway.audit import AuditLogger, AuditRecord, redact, redact_text, summarize
 from workbench.gateway.errors import is_empty_payload, normalize
 from workbench.gateway.ratelimit import RateLimiter, TokenBucket
@@ -32,6 +34,48 @@ def test_redacts_email_phone_card() -> None:
     assert "555" not in out and "[PHONE]" in out
     assert "4242 4242" not in out and "[CARD ****4242]" in out
     assert "2026-09-24" in out  # dates are not phone numbers
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2026-09-24T17:05:31.506430",  # ISO 8601 with microseconds (AWM's created_at)
+        "2026-09-24T17:05:31.506430+00:00",
+        "2026-09-24 17:05:31.506430",  # space separator
+        "2026-09-23 17:05:16",  # SQLite CURRENT_TIMESTAMP format in the official DB rows
+        "17:05:31.506430",
+        '{"created_at": "2026-09-24T17:05:31.506430", "updated_at": "2026-09-24T17:05:31.506430"}',
+    ],
+)
+def test_timestamps_are_not_redacted(text: str) -> None:
+    # observed in the Phase 12 audit log: "17:05:31.506430" became "17:05:[PHONE]" (ADR-016)
+    assert redact_text(text) == text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "call +1 555 123 4567",
+        "(555) 123-4567",
+        "555-123-4567",
+        "555.123.4567",
+        "13800138000",
+        "+44 20 7946 0958",
+        "tel:+15551234567",
+        "Tel:5551234567",
+        "phone: 555-123-4567",
+        "reached at 555-123-4567 on 2026-09-24T17:05:31.506430",
+    ],
+)
+def test_real_phone_numbers_are_still_redacted(text: str) -> None:
+    out = redact_text(text)
+    assert "[PHONE]" in out and "123" not in out and "7946" not in out and "0013" not in out
+
+
+def test_summary_keeps_timestamps_of_a_real_tool_result() -> None:
+    # add_item_to_cart result from the Phase 12 run on official e_commerce_33
+    result = {"cart_item": {"id": 4, "cart_id": 1, "created_at": "2026-09-24T17:05:31.506430"}}
+    assert "2026-09-24T17:05:31.506430" in summarize(result, 300)
 
 
 def test_redact_nested_and_summary() -> None:
