@@ -1,0 +1,27 @@
+# vLLM serving profile for Arctic-AWM-4B (Phase 4).
+#
+# UNVERIFIED-LOCAL: needs a CUDA GPU and network access to huggingface.co. The Arctic-AWM
+# model card could not be read from the dev sandbox, so the tool-call parser / chat template
+# are NOT set by default: we keep AWM README's minimal command
+#   vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000   (AWM README.md:210)
+# The workbench client parses `<tool_call>{...}</tool_call>` from message content (the format
+# AWM's own agent uses, awm/core/agent.py:130-167), so tool calling works without a parser.
+# Values below were checked against vLLM v0.19.0 source (commit 2a69949, docs/RECON.md §10).
+model: Snowflake/Arctic-AWM-4B
+served_model_name: Snowflake/Arctic-AWM-4B
+host: 127.0.0.1
+port: 8000
+# null -> vLLM derives it from the model config (vllm/config/model.py:182, default None)
+max_model_len: null
+# vLLM default is 0.9 (vllm/config/cache.py:41); kept explicit so it is visible
+gpu_memory_utilization: 0.9
+# Tool-calling flags. Leave disabled until the model card confirms the format.
+# `hermes` is registered in vLLM v0.19.0 (vllm/tool_parsers/__init__.py:61) and parses
+# <tool_call>…</tool_call> (hermes_tool_parser.py:61-65); `qwen3` is a registered reasoning
+# parser (vllm/reasoning/__init__.py:83). --enable-auto-tool-choice requires a parser
+# (vllm/entrypoints/openai/cli_args.py:364).
+enable_auto_tool_choice: false
+tool_call_parser: null        # e.g. hermes (unverified for this model)
+reasoning_parser: null        # e.g. qwen3 (unverified for this model)
+chat_template: null           # use the model's own template
+extra_args: []

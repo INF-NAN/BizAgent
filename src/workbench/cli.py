@@ -244,9 +244,20 @@ def gateway_export_risk(
 
 
 @serve_app.command("vllm-cmd")
-def serve_vllm_cmd() -> None:
-    """Print the vLLM command for the configured model."""
-    _not_implemented(4)
+def serve_vllm_cmd(
+    profile: Path = typer.Option(Path("configs/serving/arctic-awm-4b.yaml"), "--profile"),
+    args_only: bool = typer.Option(False, "--args-only", help="one argument per line (for scripts)"),
+) -> None:
+    """Print the vLLM command for a serving profile (running it needs a GPU: UNVERIFIED-LOCAL)."""
+    import shlex
+
+    from workbench.llm.serving import ServingProfile, vllm_command
+
+    cmd = vllm_command(ServingProfile.load(profile))
+    if args_only:
+        typer.echo("\n".join(cmd))
+    else:
+        typer.echo(shlex.join(cmd))
 
 
 @agent_app.command("run")
