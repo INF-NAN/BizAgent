@@ -1,0 +1,50 @@
+:root {
+  --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+  --accent: #2f5bea; --ok: #1f8a4c; --warn: #b7791f; --danger: #c53030; --read: #2f855a;
+  --write: #b7791f; --destructive: #c53030;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14161b; --panel: #1c1f26; --text: #e6e8ee; --muted: #9aa2b4; --line: #2c313c; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+.topbar { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+.brand { font-weight: 700; }
+.notice { color: var(--muted); font-size: 12px; }
+.layout { display: grid; grid-template-columns: 280px 1fr 420px; gap: 12px; padding: 12px; min-height: calc(100vh - 50px); }
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; }
+h2 { margin: 0 0 10px; font-size: 16px; } h3 { font-size: 13px; margin: 14px 0 6px; }
+label { display: block; margin: 6px 0; color: var(--muted); }
+select, input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.ok { background: var(--ok); border-color: var(--ok); } button.danger { background: var(--danger); border-color: var(--danger); }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+.hidden { display: none !important; }
+table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.badge { white-space: nowrap; padding: 1px 6px; border-radius: 10px; font-size: 11px; color: #fff; }
+.badge.read { background: var(--read); } .badge.write { background: var(--write); } .badge.destructive { background: var(--destructive); }
+.badge.ok, .badge.allowed { background: var(--ok); } .badge.empty { background: var(--muted); } .badge.error, .badge.denied { background: var(--danger); }
+.chat-panel { display: flex; flex-direction: column; }
+.chat { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; min-height: 300px; }
+.msg { padding: 8px 10px; border-radius: 8px; max-width: 90%; white-space: pre-wrap; }
+.msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+.msg.agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); }
+.msg.step { align-self: flex-start; font-size: 12px; color: var(--muted); background: transparent; padding: 0 4px; }
+.composer { display: flex; gap: 8px; margin-top: 10px; }
+.approval { border: 2px solid var(--warn); border-radius: 8px; padding: 10px; margin-top: 10px; }
+.approval pre { white-space: pre-wrap; background: var(--bg); padding: 6px; border-radius: 6px; }
+.row { display: flex; gap: 8px; margin-top: 6px; }
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.tabs button { background: transparent; color: var(--text); border-color: var(--line); }
+.tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.timeline { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+.timeline li { border-left: 3px solid var(--line); padding: 4px 8px; margin-bottom: 6px; }
+.timeline li.tool_call { border-color: var(--accent); } .timeline li.approval_required, .timeline li.approval_granted { border-color: var(--warn); }
+.timeline li.terminated, .timeline li.approval_rejected, .timeline li.memory_rejected { border-color: var(--danger); }
+.timeline li.final { border-color: var(--ok); }
+.timeline .t { color: var(--muted); } code, pre { font-family: ui-monospace, monospace; font-size: 12px; }
+.memory { padding-left: 16px; font-size: 12px; }
+.viewer-step { border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin: 6px 0; }
