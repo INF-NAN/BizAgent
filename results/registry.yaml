@@ -1,0 +1,158 @@
+# results/registry.yaml — DRAFT (Phase 0)
+#
+# The ONLY place in this repository where model-performance numbers may live (rule R3).
+# Every value here is a paper-reported number, measured by the official models on the
+# official evaluation harnesses. None of them is a measurement of this repository's
+# application layer (agent, gateway, memory, services), which has never been benchmarked.
+#
+# Phase 0 status:
+#   The arXiv PDF could not be opened: arxiv.org is blocked by this environment's egress
+#   policy (curl: "CONNECT tunnel failed, response 403"; WebFetch: EGRESS_BLOCKED).
+#   Therefore EVERY entry is `verified: false`, and version / table / row / column are
+#   null. The values below were transcribed verbatim from TASK.md section 1.4 and must be
+#   checked cell by cell against the PDF before anything cites them.
+#
+# Field contract (kept stable for the Phase 8 number guard):
+#   id            unique key: <benchmark>.<metric>.<size>.<base|awm>
+#   value         number as a float; `printed` keeps the paper's textual precision
+#   source        arxiv_id, version, table, row, column, plus where the value was transcribed from
+#   verified      true only after a human-readable check against the PDF table cell
+
+schema_version: 1
+
+disclaimer: "论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果。"
+
+paper:
+  arxiv_id: "2602.10090"
+  title: "Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning"
+  venue_claimed: "ICML 2026 (per upstream README.md:38, not independently verified)"
+  version_checked: null
+  pdf_accessed: false
+  access_note: "arxiv.org blocked by the environment egress policy on 2026-09-24"
+
+# Column labels follow TASK.md section 1.4 ("<size> 基座 -> AWM"). The model identities
+# below are the task book's description (section 1.3) and are NOT verified.
+models:
+  4b.base:  {label: "4B base",  presumed_identity: "Qwen3-4B (thinking)",   verified: false}
+  4b.awm:   {label: "4B AWM",   presumed_identity: "Snowflake/Arctic-AWM-4B",  verified: false}
+  8b.base:  {label: "8B base",  presumed_identity: "Qwen3-8B (thinking)",   verified: false}
+  8b.awm:   {label: "8B AWM",   presumed_identity: "Snowflake/Arctic-AWM-8B",  verified: false}
+  14b.base: {label: "14B base", presumed_identity: "Qwen3-14B (thinking)",  verified: false}
+  14b.awm:  {label: "14B AWM",  presumed_identity: "Snowflake/Arctic-AWM-14B", verified: false}
+
+entries:
+  - id: bfclv3.overall.4b.base
+    benchmark: BFCLv3
+    metric: Overall
+    model: 4b.base
+    value: 54.92
+    printed: "54.92"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: bfclv3.overall.4b.awm
+    benchmark: BFCLv3
+    metric: Overall
+    model: 4b.awm
+    value: 64.50
+    printed: "64.50"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: bfclv3.overall.8b.base
+    benchmark: BFCLv3
+    metric: Overall
+    model: 8b.base
+    value: 53.83
+    printed: "53.83"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: bfclv3.overall.8b.awm
+    benchmark: BFCLv3
+    metric: Overall
+    model: 8b.awm
+    value: 65.94
+    printed: "65.94"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: bfclv3.overall.14b.base
+    benchmark: BFCLv3
+    metric: Overall
+    model: 14b.base
+    value: 61.25
+    printed: "61.25"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: bfclv3.overall.14b.awm
+    benchmark: BFCLv3
+    metric: Overall
+    model: 14b.awm
+    value: 70.18
+    printed: "70.18"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: tau2.pass1.14b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 14b.awm
+    value: 39.03
+    printed: "39.03"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: mcp_universe.success.8b.base
+    benchmark: MCP-Universe
+    metric: "success rate"
+    model: 8b.base
+    value: 6.70
+    printed: "6.70"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+  - id: mcp_universe.success.8b.awm
+    benchmark: MCP-Universe
+    metric: "success rate"
+    model: 8b.awm
+    value: 11.17
+    printed: "11.17"
+    unit: unknown
+    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
+             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
+    verified: false
+
+# Cells that TASK.md section 1.4 marks as "待核对" (to be checked), plus the extra cells
+# Phase 0 was asked to read (per-domain / per-category / other base values). None of them
+# could be read because the PDF was inaccessible; no value is recorded for them.
+pending:
+  - benchmark: "tau2-bench"
+    metric: "Pass@1"
+    cells: [4b.base, 4b.awm, 8b.base, 8b.awm, 14b.base]
+    also: "per-domain values (domains to be taken from the paper table)"
+  - benchmark: MCP-Universe
+    metric: "success rate"
+    cells: [4b.base, 4b.awm, 14b.base, 14b.awm]
+    also: "per-category values (categories to be taken from the paper table)"
+  - benchmark: BFCLv3
+    metric: "sub-category columns, if reported"
+    cells: []
+    also: "only Overall is transcribed so far"
