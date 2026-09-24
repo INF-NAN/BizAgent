@@ -449,8 +449,35 @@ def train_launch(
 
 @results_app.command("check")
 def results_check() -> None:
-    """Validate the registry and scan docs for unregistered numbers."""
-    _not_implemented(8)
+    """Validate results/registry.yaml and scan README + docs for unregistered numbers."""
+    from workbench.results.check_numbers import default_targets, load_whitelist, scan
+    from workbench.results.registry import RegistryError, load_registry
+
+    root = Path.cwd()
+    try:
+        reg = load_registry(root / "results" / "registry.yaml")
+    except RegistryError as exc:
+        console.print(f"[red]registry invalid: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    files = default_targets(root)
+    findings = scan(files, reg, load_whitelist(root / "configs" / "number_whitelist.yaml"), root)
+    for f in findings:
+        console.print(str(f), style="red", markup=False, highlight=False)
+    unverified = sum(1 for e in reg.entries if not e.verified)
+    console.print(
+        f"registry: {len(reg.entries)} entries ({unverified} unverified); scanned {len(files)} files; "
+        f"{len(findings)} finding(s)"
+    )
+    raise typer.Exit(code=1 if findings else 0)
+
+
+@results_app.command("render")
+def results_render(out: Path = typer.Option(Path("docs/RESULTS.md"), "--out")) -> None:
+    """Regenerate docs/RESULTS.md from results/registry.yaml."""
+    from workbench.results.registry import load_registry, render_results_md
+
+    out.write_text(render_results_md(load_registry(Path("results/registry.yaml"))), encoding="utf-8")
+    console.print(f"wrote {out}")
 
 
 if __name__ == "__main__":
