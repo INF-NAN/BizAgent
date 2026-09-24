@@ -274,7 +274,7 @@ class Gateway:
         except UpstreamTransportError as exc:
             err = GatewayError("transport_error", str(exc), ["the environment may be down"], retryable=True)
             return self._error(trace, prefixed, err, risk=risk, approver=decision.approver)
-        norm: NormalizedResult = normalize(tool, is_error, text, gt.input_schema)
+        norm: NormalizedResult = normalize(tool, is_error, text, gt.input_schema, read_only=risk == "read")
         return CallOutcome(
             trace,
             prefixed,

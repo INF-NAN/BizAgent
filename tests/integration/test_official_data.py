@@ -131,3 +131,20 @@ async def test_official_empty_search_normalizes_to_empty(official: EnvManager) -
     assert norm.status == "error" and norm.error is not None
     assert norm.error.details["expected_type"] == "'integer'"
     assert not official.diff("off2").is_changed
+
+
+async def test_successful_write_with_empty_lists_is_not_empty(official: EnvManager) -> None:
+    # official social_media_4: removing every hidden subreddit is a real write whose result has
+    # only an empty list; it must be "ok", not "empty" (ADR-014)
+    from workbench.gateway.policy import PolicyConfig, classify
+
+    h = await official.start("social_media_4", session_id="off3")
+    async with streamablehttp_client(h.url) as (r, w, _), ClientSession(r, w) as s:
+        await s.initialize()
+        res = await s.call_tool("patch_hidden_subreddits", {"remove_subreddit_ids": list(range(1, 2001))})
+    text = res.content[0].text
+    assert not res.isError and json.loads(text)["hide_subreddit_ids"] == []
+    risk = classify("patch_hidden_subreddits", "", PolicyConfig.load(Path("configs/tool_policy.yaml"))).level
+    assert risk != "read"
+    assert normalize("patch_hidden_subreddits", False, text, read_only=risk == "read").status == "ok"
+    assert official.diff("off3").tables["user_content_preferences"].changed == [1]

@@ -128,3 +128,14 @@ async def test_unknown_session(gw: tuple[Gateway, FakeUpstream]) -> None:
     g, _ = gw
     with pytest.raises(UnknownSessionError):
         await g.call_tool("nope", "mini__search_products", {})
+
+
+async def test_empty_status_only_for_read_tools(gw: tuple[Gateway, FakeUpstream]) -> None:
+    g, up = gw
+    await g.register_session("s1", "mini", "http://x/mcp")
+    up.responses["list_cart_items"] = (False, '{"cart_id": 1, "items": []}')
+    up.responses["add_item_to_cart"] = (False, '{"cart_id": 1, "items": []}')
+    assert (await g.call_tool("s1", "mini__list_cart_items", {})).status == "empty"
+    token = g.issue_approval("s1", "mini__add_item_to_cart", {"product_id": 1}, approver="alice")
+    out = await g.call_tool("s1", "mini__add_item_to_cart", {"product_id": 1}, approval_token=token)
+    assert out.decision == "allowed" and out.status == "ok"

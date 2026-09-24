@@ -78,6 +78,16 @@ def test_wrapped_empty_lists_are_empty() -> None:
         assert not is_empty_payload(text), text
 
 
+def test_writes_are_never_empty() -> None:
+    # successful write whose result has only empty lists (official social_media_4, 2026-09-24)
+    text = '{"user_id": 1, "hide_subreddit_ids": [], "nsfw_blur_enabled": true}'
+    assert normalize("patch_hidden_subreddits", False, text).status == "empty"  # as a query
+    assert normalize("patch_hidden_subreddits", False, text, read_only=False).status == "ok"
+    assert normalize("clear_cart", False, "[]", read_only=False).status == "ok"
+    err = normalize("clear_cart", True, "Input validation error: 'x' is a required property", read_only=False)
+    assert err.status == "error"
+
+
 def test_type_violation_gets_expected_type() -> None:
     r = normalize("get_product_by_id", True, "Input validation error: 'abc' is not of type 'integer'")
     assert r.error is not None and r.error.code == "invalid_arguments"

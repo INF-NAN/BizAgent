@@ -145,9 +145,22 @@ def is_empty_payload(text: str) -> bool:
     return isinstance(parsed, dict) and _is_empty_wrapper(parsed)
 
 
-def normalize(tool: str, is_error: bool, text: str, schema: dict[str, Any] | None = None) -> NormalizedResult:
+def normalize(
+    tool: str,
+    is_error: bool,
+    text: str,
+    schema: dict[str, Any] | None = None,
+    *,
+    read_only: bool = True,
+) -> NormalizedResult:
+    """`read_only=False` (write/destructive tools): a successful call is always OK.
+
+    EMPTY means "the query matched nothing"; it is meaningless for a write whose result
+    happens to contain only empty lists, e.g. ``{"user_id": 1, "hide_subreddit_ids": []}``
+    after removing every hidden id (observed on official social_media_4, ADR-014).
+    """
     if not is_error:
-        if is_empty_payload(text):
+        if read_only and is_empty_payload(text):
             return NormalizedResult("empty", text, data=_parse_json(text))
         return NormalizedResult("ok", text, data=_parse_json(text))
     if m := VALIDATION.match(text):

@@ -186,3 +186,9 @@
 - **代价**：
   - 这是启发式规则。例如 `{"success": false}` 与 `get_product_by_id` 对不存在 ID 返回的占位对象（`id: 0`）仍判为 `ok`，网关无法通用地识别；
   - 上游生成代码对不存在的外键也会直接写入（例如向购物车加入不存在的 offer），这类语义错误只能靠审批与 DB diff 暴露，网关不做判断。
+- **补充（同日，复查写操作）**：
+  - 问题：上述规则不区分读写。在官方 `social_media_4` 上实测，`patch_hidden_subreddits` 移除全部隐藏项后返回 `{"user_id": 1, "hide_subreddit_ids": [], ...}`，数据库确实被修改，却被判为 `empty`。对官方 1000 个环境的静态扫描显示，写类路由（POST / PUT / PATCH / DELETE）中约有 1647 条的返回模型只含列表与标量字段，都可能被这样误判（`docs/verification/2026-09-24-empty-on-writes.md`）。
+  - 影响：智能体没有按 `empty` 分支的硬编码流程；但 act 提示词把 `empty` 解释为"没有匹配结果"，模型可能误以为写操作没有生效而重试；审计日志与指标也会把成功的写操作记为 `empty`。"无状态变化"守卫使用数据库指纹，不受影响。
+  - 决定：`empty` 只用于风险级别为 `read` 的工具；`write` / `destructive` 工具调用成功时一律为 `ok`（`normalize(..., read_only=...)`，由网关按分级传入）。
+  - 剩余代价：名称里带读动词、实际会写入的工具（例如 `get_or_create_active_cart`）仍按 `read` 处理；可以通过 `configs/tool_policy.yaml` 的 `overrides` 纠正。
+
