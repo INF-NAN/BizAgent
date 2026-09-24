@@ -63,7 +63,25 @@ def test_empty_is_not_error() -> None:
         r = normalize("t", False, text)
         assert r.status == "empty" and r.error is None, text
     assert normalize("t", False, '[{"id": 1}]').status == "ok"
-    assert not is_empty_payload('{"items": []}')
+
+
+def test_wrapped_empty_lists_are_empty() -> None:
+    # shapes returned by the official e_commerce_33 environment (2026-09-24)
+    for text in ['{"products": [], "total": 0}', '{"cart_id": 1, "items": []}', '{"items": []}']:
+        assert is_empty_payload(text), text
+    for text in [
+        '{"success": false}',
+        '{"products": [{"id": 1}], "total": 1}',
+        '{"product": {"id": 0}, "aggregates": null, "active_offers": []}',
+        '{"total": 0}',
+    ]:
+        assert not is_empty_payload(text), text
+
+
+def test_type_violation_gets_expected_type() -> None:
+    r = normalize("get_product_by_id", True, "Input validation error: 'abc' is not of type 'integer'")
+    assert r.error is not None and r.error.code == "invalid_arguments"
+    assert r.error.details["expected_type"] == "'integer'"
 
 
 def test_enum_violation_gets_allowed_values() -> None:

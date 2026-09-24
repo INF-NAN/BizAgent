@@ -3,8 +3,11 @@
 Upstream shapes (measured against the real AWM launcher, docs/RECON.md §10 Phase 2):
 - ``Input validation error: 'x' is not one of ['a', 'b']``   (MCP SDK jsonschema check)
 - ``Input validation error: 'field' is a required property``
+- ``Input validation error: 'abc' is not of type 'integer'`` (official e_commerce_33, 2026-09-24)
 - ``Error calling <tool>. Status code: <N>. Response: <body>`` (fastapi-mcp, server.py:558-561)
 - a successful call whose text is ``[]`` / ``{}`` / ``null`` / empty -> EMPTY, never an error.
+- official AgentWorldModel-1K environments wrap lists in an object, e.g.
+  ``{"products": [], "total": 0}`` or ``{"cart_id": 1, "items": []}`` -> also EMPTY (ADR-014).
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ Status = Literal["ok", "empty", "error"]
 VALIDATION = re.compile(r"^Input validation error: (?P<msg>.*)$", re.S)
 NOT_ONE_OF = re.compile(r"^(?P<value>.+?) is not one of (?P<choices>\[.*\])")
 REQUIRED = re.compile(r"^'(?P<field>[^']+)' is a required property")
+NOT_OF_TYPE = re.compile(r"^(?P<value>.+?) is not of type (?P<types>.+)$", re.S)
 HTTP = re.compile(
     r"^Error calling (?P<tool>\S+)\. Status code: (?P<code>\d{3})\. Response: (?P<body>.*)$", re.S
 )
@@ -79,6 +83,9 @@ def _validation_error(msg: str, schema: dict[str, Any] | None) -> GatewayError:
     elif m := REQUIRED.match(msg):
         err.details["missing_fields"] = [m.group("field")]
         err.hints.append(f"add the required field '{m.group('field')}'")
+    elif m := NOT_OF_TYPE.match(msg):
+        err.details["expected_type"] = m.group("types").strip()
+        err.hints.append(f"value {m.group('value')} has the wrong type; expected {m.group('types').strip()}")
     enums = _enum_hints(schema)
     if enums:
         err.details.setdefault("enums", enums)
@@ -116,12 +123,26 @@ def _http_error(tool: str, status: int, body: str, schema: dict[str, Any] | None
     return GatewayError("upstream_http_error", f"{tool}: HTTP {status}", [], details={"body": body[:500]})
 
 
+def _is_empty_wrapper(obj: dict[str, Any]) -> bool:
+    """A list wrapped in an object with only scalar metadata, e.g. {"products": [], "total": 0}.
+
+    Empty when there is at least one list field, every list field is empty and no field holds a
+    nested object; scalar fields (counts, ids, pagination) do not make it non-empty.
+    """
+    lists = [v for v in obj.values() if isinstance(v, list)]
+    if not lists or any(lists):
+        return False
+    return not any(isinstance(v, dict) for v in obj.values())
+
+
 def is_empty_payload(text: str) -> bool:
     stripped = text.strip()
     if stripped in ("", "null", '""'):
         return True
     parsed = _parse_json(stripped)
-    return bool(parsed == [] or parsed == {})
+    if parsed == [] or parsed == {}:
+        return True
+    return isinstance(parsed, dict) and _is_empty_wrapper(parsed)
 
 
 def normalize(tool: str, is_error: bool, text: str, schema: dict[str, Any] | None = None) -> NormalizedResult:
