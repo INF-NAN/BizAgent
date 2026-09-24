@@ -204,8 +204,43 @@ def env_search(keyword: str, dataset_dir: Path | None = typer.Option(None, "--da
 
 @gateway_app.command("serve")
 def gateway_serve() -> None:
-    """Run the MCP gateway server."""
-    _not_implemented(3)
+    """Run the MCP gateway standalone (MCP at /mcp, admin endpoints under /admin)."""
+    import uvicorn
+
+    from workbench.gateway.core import Gateway
+    from workbench.gateway.server import create_gateway_app
+
+    s = get_settings().gateway
+    uvicorn.run(create_gateway_app(Gateway(s)), host=s.host, port=s.port)
+
+
+@gateway_app.command("export-risk")
+def gateway_export_risk(
+    dataset_dir: Path | None = typer.Option(None, "--dataset-dir"),
+    out: Path = typer.Option(Path("data/risk_table.csv"), "--out"),
+) -> None:
+    """Classify every tool of every scenario (offline, by tool name) into a CSV for human review."""
+    import csv
+
+    from workbench.envs.catalog import build_catalog
+    from workbench.gateway.policy import PolicyConfig, classify
+
+    settings = get_settings()
+    policy = PolicyConfig.load(settings.gateway.policy_file)
+    directory = dataset_dir or settings.env.dataset_dir
+    out.parent.mkdir(parents=True, exist_ok=True)
+    rows = 0
+    with out.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["scenario", "tool", "risk", "source", "reason", "requires_approval"])
+        for scenario in build_catalog(directory):
+            for tool in scenario.tool_names:
+                c = classify(tool, "", policy, scenario.name)
+                writer.writerow(
+                    [scenario.name, tool, c.level, c.source, c.reason, c.level in policy.require_approval]
+                )
+                rows += 1
+    console.print(f"wrote {rows} rows to {out} (offline: names only; live sessions add descriptions)")
 
 
 @serve_app.command("vllm-cmd")
