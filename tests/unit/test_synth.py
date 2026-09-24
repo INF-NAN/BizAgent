@@ -217,6 +217,8 @@ def test_full_pipeline_still_needs_the_embedding_key(tmp_path: Path) -> None:
     [
         ({"name": "e_commerce_33", "description": "an official name"}, "local_"),
         ({"name": "local_Help Desk", "description": "not normalized"}, "local_"),
+        # official names are all <category>_<number>; two of them start with local_ too
+        ({"name": "local_search_1", "description": "official naming scheme"}, "suffix"),
         ({"name": "local_x", "description": "d", "extra": "y"}, "expected"),
         ({"name": "local_x", "description": " "}, "expected"),
     ],
@@ -243,3 +245,19 @@ def test_scenario_file_count_and_existing_input(tmp_path: Path) -> None:
     )
     with pytest.raises(SynthError, match="differs"):
         r.execute(validate=False)
+
+
+def test_scenario_file_refuses_names_from_the_official_list(tmp_path: Path) -> None:
+    official = tmp_path / "official"
+    official.mkdir()
+    (official / "gen_scenario.jsonl").write_text(json.dumps(LOCAL_SCENARIO) + "\n", encoding="utf-8")
+    s = Settings(synth={"out_dir": tmp_path / "synth"}, env={"dataset_dir": official})  # type: ignore[arg-type]
+    with pytest.raises(SynthError, match="official scenario name"):
+        SynthRunner(s, tmp_path / "synth" / "r", scenarios=1, scenario_file=scenario_file(tmp_path))
+    run_dir = tmp_path / "synth" / "r5"
+    other = {"name": "local_other_desk", "description": "d"}
+    src = scenario_file(tmp_path, other)
+    r = SynthRunner(s, run_dir, scenarios=1, environ=ENV, command_runner=FakeAwm(), scenario_file=src)
+    r.execute(validate=False)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["official_name_check"].endswith("(1 names)")

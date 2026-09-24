@@ -39,9 +39,12 @@ from workbench.synth.validate import ValidationReport, parse_check_all
 
 STEPS = ("scenario", "task", "db", "sample", "spec", "env", "verifier")
 REQUIRED_ENV = ("OPENAI_API_KEY", "AWM_SYN_OVERRIDE_MODEL", "EMBEDDING_OPENAI_API_KEY")
-# Hand-written scenarios: AWM's normalized form (awm/tools.py:335-339) with a local_ prefix, so they
-# never collide with an official AgentWorldModel-1K scenario name (ADR-011, ADR-021).
+# Hand-written scenarios: AWM's normalized form (awm/tools.py:335-339) with a local_ prefix and
+# no `_<number>` suffix. All 1000 official names are `<category>_<number>`, and two of them start
+# with local_ as well (local_search_1, local_services_marketplace_1), so the prefix alone would not
+# keep them apart (ADR-011, ADR-021).
 LOCAL_SCENARIO_NAME = re.compile(r"local_[a-z0-9_]+")
+OFFICIAL_SUFFIX = re.compile(r"_\d+$")
 CommandRunner = Callable[[list[str], dict[str, str], Path], int]
 
 
@@ -74,8 +77,11 @@ def _awm(*args: str) -> list[str]:
     return [sys.executable, "-m", "awm.cli", *args]
 
 
-def load_scenario_file(path: Path) -> list[dict[str, str]]:
-    """Read a hand-written scenario file: official gen_scenario.jsonl format, local_ names only."""
+def load_scenario_file(path: Path, official_names: set[str] | None = None) -> list[dict[str, str]]:
+    """Read a hand-written scenario file: official gen_scenario.jsonl format, local_ names only.
+
+    ``official_names`` (from the official gen_scenario.jsonl, when present) are refused as well.
+    """
     if not path.is_file():
         raise SynthError(f"scenario file not found: {path}")
     rows: list[dict[str, str]] = []
@@ -93,8 +99,13 @@ def load_scenario_file(path: Path) -> list[dict[str, str]]:
         ):
             expected = '{"name": str, "description": str} as in gen_scenario.jsonl'
             raise SynthError(f"{path}:{n}: expected {expected}")
-        if not LOCAL_SCENARIO_NAME.fullmatch(row["name"]):
-            raise SynthError(f"{path}:{n}: name must match local_[a-z0-9_]+ (got {row['name']!r})")
+        name = row["name"]
+        if not LOCAL_SCENARIO_NAME.fullmatch(name) or OFFICIAL_SUFFIX.search(name):
+            raise SynthError(
+                f"{path}:{n}: name must be local_[a-z0-9_]+ without a _<number> suffix (got {name!r})"
+            )
+        if official_names and name in official_names:
+            raise SynthError(f"{path}:{n}: {name!r} is an official scenario name")
         rows.append(row)
     if not rows:
         raise SynthError(f"{path}: no scenarios")
@@ -254,8 +265,15 @@ class SynthRunner:
             raise SynthError("--scenarios must be >= 1")
         if verifier_mode not in ("sql", "code"):
             raise SynthError("--verifier-mode must be sql or code")
+        official = settings.env.dataset_dir / "gen_scenario.jsonl"
+        self.official_name_check = f"{official} (not present)"
         if scenario_file is not None:
-            rows = load_scenario_file(scenario_file)
+            names = None
+            if official.is_file():
+                lines = official.read_text(encoding="utf-8").splitlines()
+                names = {json.loads(line)["name"] for line in lines if line.strip()}
+                self.official_name_check = f"{official} ({len(names)} names)"
+            rows = load_scenario_file(scenario_file, names)
             if scenarios > len(rows):
                 raise SynthError(f"--scenarios {scenarios} but {scenario_file} has {len(rows)} scenario(s)")
         self.settings = settings
@@ -317,6 +335,7 @@ class SynthRunner:
                 "skipped_steps": ["scenario"],
                 "scenario_file": str(self.scenario_file),
                 "scenario_file_sha256": hashlib.sha256(data).hexdigest(),
+                "official_name_check": self.official_name_check,
                 "scenario_note": "hand-written local_ scenarios; gen scenario skipped (no embedding API)",
             }
         else:

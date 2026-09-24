@@ -362,7 +362,8 @@
 - **决定**：采用方案 2，由 `src/workbench/synth/runner.py` 与 `cli.py` 实现。
   - **校验**：
     - 每行必须恰好是 `{"name": str, "description": str}`，与官方格式一致；
-    - 名称必须是 AWM 规范化后的形式（`awm/tools.py:335-339`），并以 `local_` 开头（`local_[a-z0-9_]+`），这样不会与官方场景重名（ADR-011）；
+    - 名称必须是 AWM 规范化后的形式（`awm/tools.py:335-339`），以 `local_` 开头，并且不以 `_<数字>` 结尾。只靠前缀不够：官方 revision `dde80a0` 的 1000 个场景名全部是 `<类别>_<序号>`，其中 `local_search_1` 与 `local_services_marketplace_1` 也以 `local_` 开头；
+    - 官方数据在本地时（`env.dataset_dir` 下的 `gen_scenario.jsonl`），名称不得与其中任何一个相同；manifest 的 `official_name_check` 记录这项检查是否执行（ADR-011）；
     - `--scenarios` 不能超过文件中的条数。
   - **不覆盖已有输入**：运行目录中已有内容不同的 `gen_scenario.jsonl` 时报错；内容相同则继续，以便续跑。
   - **所需环境变量**：只有 `gen scenario` 需要 embedding key，所以这种模式下 `--execute` 只要求 `OPENAI_API_KEY` 与 `AWM_SYN_OVERRIDE_MODEL`。
@@ -370,4 +371,4 @@
   - **默认行为不变**：不传该参数时仍从 `gen scenario` 开始，仍要求 embedding key。
 - **代价**：
   - 手写场景代替了 `gen scenario` 的生成与去重，这一步没有执行，也没有得到验证（U9 中 `gen scenario` 的部分仍未验证）。
-  - `local_` 前缀是本仓库的约定，不是 AWM 的要求。
+  - `local_` 前缀与"不以 `_<数字>` 结尾"是本仓库的约定，不是 AWM 的要求；后者依据的是当前官方数据的命名方式。
