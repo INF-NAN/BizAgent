@@ -72,7 +72,7 @@ extend-exclude = ["third_party", "tests/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["RUF001", "RUF002", "RUF003"]
+ignore = ["RUF001", "RUF002", "RUF003", "B008"]  # B008: typer.Option defaults are idiomatic
 
 [tool.mypy]
 python_version = "3.12"

@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Coroutine
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from workbench.config import get_settings
+
+if TYPE_CHECKING:
+    from workbench.envs.service import RemoteEnvService
+
 
 app = typer.Typer(
     help="BizAgent Workbench: engineering layer around AWM MCP environments.", no_args_is_help=True
@@ -60,10 +69,137 @@ def doctor() -> None:
     raise typer.Exit(code=exit_code(results))
 
 
+def _env_client() -> RemoteEnvService:
+    from workbench.envs.service import RemoteEnvService
+
+    s = get_settings().env
+    return RemoteEnvService(s.manager_url or f"http://{s.manager_host}:{s.manager_port}")
+
+
+def _run[T](coro: Coroutine[Any, Any, T]) -> T:
+    return asyncio.run(coro)
+
+
+@env_app.command("serve")
+def env_serve() -> None:
+    """Run the env-manager control plane (owns the AWM server subprocesses)."""
+    import uvicorn
+
+    from workbench.envs.http import create_env_app
+
+    s = get_settings().env
+    uvicorn.run(create_env_app(s), host=s.manager_host, port=s.manager_port)
+
+
+@env_app.command("up")
+def env_up(scenario: str, session_id: str | None = typer.Option(None, "--session-id")) -> None:
+    """Start an isolated environment session (via `workbench env serve`)."""
+
+    async def go() -> None:
+        client = _env_client()
+        try:
+            info = await client.start(scenario, session_id)
+        finally:
+            await client.close()
+        console.print_json(data=info.as_dict())
+
+    _run(go())
+
+
+@env_app.command("down")
+def env_down(session_id: str) -> None:
+    """Stop an environment session."""
+
+    async def go() -> None:
+        client = _env_client()
+        try:
+            await client.stop(session_id)
+        finally:
+            await client.close()
+        console.print(f"stopped {session_id}")
+
+    _run(go())
+
+
 @env_app.command("ls")
 def env_ls() -> None:
-    """List running environment sessions."""
-    _not_implemented(2)
+    """List environment sessions."""
+
+    async def go() -> None:
+        client = _env_client()
+        try:
+            envs = await client.list_envs()
+        finally:
+            await client.close()
+        table = Table(title="environments")
+        for col in ("session", "scenario", "state", "url", "tools", "error"):
+            table.add_column(col)
+        for e in envs:
+            table.add_row(e.session_id, e.scenario, e.state, e.url, str(len(e.tools)), e.error or "")
+        console.print(table)
+
+    _run(go())
+
+
+@env_app.command("logs")
+def env_logs(session_id: str, lines: int = typer.Option(200, "--lines", "-n")) -> None:
+    """Show the tail of a session's server log."""
+
+    async def go() -> None:
+        client = _env_client()
+        try:
+            console.print(await client.logs(session_id, lines), markup=False, highlight=False)
+        finally:
+            await client.close()
+
+    _run(go())
+
+
+@env_app.command("diff")
+def env_diff(session_id: str, against: str = typer.Option("initial", "--against")) -> None:
+    """Show table-level row-count and primary-key diff against the initial DB or a snapshot."""
+
+    async def go() -> None:
+        client = _env_client()
+        try:
+            console.print_json(data=await client.diff(session_id, against))
+        finally:
+            await client.close()
+
+    _run(go())
+
+
+@env_app.command("snapshot")
+def env_snapshot(session_id: str, name: str) -> None:
+    """Snapshot a session DB."""
+    client = _env_client()
+    _run(client.snapshot(session_id, name))
+    console.print(f"snapshot {name} saved")
+
+
+@env_app.command("restore")
+def env_restore(session_id: str, name: str) -> None:
+    """Restore a session DB from `initial` or a named snapshot."""
+    client = _env_client()
+    _run(client.restore(session_id, name))
+    console.print(f"restored {name}")
+
+
+@env_app.command("search")
+def env_search(keyword: str, dataset_dir: Path | None = typer.Option(None, "--dataset-dir")) -> None:
+    """Search the scenario catalog (name or tool name) built from the dataset directory."""
+    from workbench.envs.catalog import build_catalog, search
+
+    directory = dataset_dir or get_settings().env.dataset_dir
+    rows = search(build_catalog(directory), keyword)
+    table = Table(title=f"scenarios matching {keyword!r} in {directory}")
+    for col in ("scenario", "tools", "tasks", "tables"):
+        table.add_column(col)
+    for r in rows:
+        table.add_row(r.name, str(r.tools), str(r.tasks), str(r.tables))
+    console.print(table)
+    if not rows:
+        raise typer.Exit(code=1)
 
 
 @gateway_app.command("serve")
