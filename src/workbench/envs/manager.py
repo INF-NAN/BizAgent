@@ -33,6 +33,7 @@ from workbench.envs import snapshot as snap
 from workbench.envs.catalog import load_route_methods
 from workbench.envs.health import HealthResult, check_mcp
 from workbench.envs.ports import PortPool
+from workbench.subprocess_env import generated_code_env
 
 EnvState = Literal["starting", "healthy", "unhealthy", "stopped"]
 HealthFn = Callable[[str, float], Awaitable[HealthResult]]
@@ -212,8 +213,8 @@ class EnvManager:
             temp_server_path=run_dir / "temp_server.py",
             output_dir=run_dir / "awm_server",
         )
-        env = dict(os.environ)
-        env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
+        # The server runs the scenario's generated code: allowlisted variables only (ADR-019).
+        env = generated_code_env()
         now = self._clock()
         handle = EnvHandle(
             session_id=sid,

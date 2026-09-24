@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from workbench.config import Settings
+from workbench.subprocess_env import LLM_VARS, NETWORK_VARS, generated_code_env, pick
 from workbench.synth.ledger import Ledger, load_prices
 from workbench.synth.validate import ValidationReport, parse_check_all
 
@@ -266,10 +267,16 @@ class SynthRunner:
         (self.run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def step_env(self, step: str, proxy_base: str | None) -> dict[str, str]:
-        env = dict(self._environ)
-        env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
+        """Environment of one `awm gen` step: the allowlist plus the LLM settings (ADR-019).
+
+        `gen env` and `gen verifier` also run the code they generate (awm/core/env.py:161-172,
+        awm/core/verifier.py:104). Through the proxy a step gets a placeholder key and the
+        upstream key stays in this process; without it, only the LLM and network variables.
+        """
+        env = generated_code_env(self._environ)
         if proxy_base:
             base = f"{proxy_base}/step/{step}/v1"
+            env.update(pick(self._environ, ("AWM_SYN_OVERRIDE_MODEL",)))
             env.update(
                 {
                     "AWM_SYN_LLM_PROVIDER": "openai",
@@ -279,6 +286,8 @@ class SynthRunner:
                     "EMBEDDING_OPENAI_API_KEY": "workbench-proxy",  # pragma: allowlist secret
                 }
             )
+        else:
+            env.update(pick(self._environ, LLM_VARS + NETWORK_VARS))
         return env
 
     def execute(self, proxy_base: str | None = None, validate: bool = True) -> dict[str, Any]:
@@ -317,7 +326,8 @@ class SynthRunner:
         return result
 
     def validate(self) -> ValidationReport:
-        return validate_run(self.run_dir, self._run, self.step_env("validate", None))
+        # reset_db and check_all run generated SQL and server code and call no LLM: no keys.
+        return validate_run(self.run_dir, self._run, generated_code_env(self._environ))
 
 
 def validate_run(run_dir: Path, run: CommandRunner, env: dict[str, str]) -> ValidationReport:

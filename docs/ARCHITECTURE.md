@@ -22,7 +22,7 @@ flowchart TB
     GATE["gateway/core.py + server.py<br/>MCP server：路由 · deny-first 策略 · 一次性审批令牌 · 限流 · 审计 · 空/错归一"]
   end
   subgraph ENV["环境层"]
-    MGR["envs/manager.py + service.py<br/>env-manager：每会话独立 DB · 进程组 · 快照/diff · 回收"]
+    MGR["envs/manager.py + service.py<br/>env-manager：每会话独立 DB · 进程组 · 环境变量白名单 · 快照/diff · 回收"]
     AWMSRV["AWM MCP server 子进程<br/>third_party/agent-world-model（只读）"]
     DB[("会话 SQLite<br/>initial.db / work.db")]
   end

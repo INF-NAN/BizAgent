@@ -270,3 +270,48 @@
   - 模型在 system prompt 里看不到工具描述，只能从原生 `tools` 读取，因此服务端必须把 `tools` 渲染进提示词。DeepSeek 会这样做（见上面的离线编码）。对 vLLM v0.19.0 读源码发现：请求带 `tools` 却没有 `tool_choice` 时默认为 `"auto"`（`vllm/entrypoints/openai/chat_completion/protocol.py:640-643`），服务端未配置 tool parser 时直接返回错误 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`（`vllm/entrypoints/serve/render/serving.py:197-215`）；配置之后 `tools` 才会交给 chat template 渲染（同文件 `:223-247`）。act 请求一直带原生 `tools`（修复前也是），所以按当前的 serving profile（未设 parser）vLLM 后端本来就会在第一次 act 调用时失败，与本 ADR 无关；记入 LIMITATIONS U1，未在 GPU 上验证；
   - 预算默认值只按一个参考场景与一次运行测得，不代表所有场景；
   - plan 请求仍带完整定义（约 12K token），未在本 ADR 范围内。
+
+## ADR-019 执行生成代码的子进程只拿到白名单中的环境变量（deny-first）
+
+- **背景**：env-manager 用 `dict(os.environ)` 启动 AWM env server（修复前在 `src/workbench/envs/manager.py:215`），而 server 执行的是场景中由 LLM 生成的 `full_code`（`awm/core/server.py:163`）。`SynthRunner.validate` 与 `workbench synth validate` 同样把完整环境交给 `awm env reset_db`（执行生成的 SQL）和 `awm env check_all`。后者逐个启动生成的 server，而 `awm/core/env.py:161-172` 的 `Popen` 没有传 `env=`，所以这些 server 会继承它的环境。gen 步骤则是在完整环境上叠加代理设置。结果是 `DEEPSEEK_API_KEY`，以及容器里的云令牌和 git 令牌，生成代码都能读到。
+- **可选方案**：
+  1. 黑名单：删除名字像密钥的变量（`*_API_KEY`、`*_TOKEN` 等）。名字不规则的秘密会漏掉，例如 `GIT_CONFIG_VALUE_0` 中的认证头、代理 URL 中的凭据；
+  2. 白名单（deny-first）：只传运行必需的变量，其余一律丢弃。这是仓库主人在 Phase 12.5 指定的方案。
+- **决定**：采用方案 2，由新模块 `src/workbench/subprocess_env.py` 实现。
+  - **不调用 LLM 的子进程**用 `generated_code_env()`，它只保留 `BASE_VARS`：`PATH`、`LANG`、`LANGUAGE`、`LC_ALL`、`LC_CTYPE`、`TZ`、`TMPDIR`、`PYTHONIOENCODING`、`PYTHONUTF8`、`PYTHONUNBUFFERED`、`PYTHONPYCACHEPREFIX`。`PYTHONPYCACHEPREFIX` 缺省时补为 `.cache/pycache`。
+    - 使用者：env server（`envs/manager.py`）、`SynthRunner.validate` 与 `workbench synth validate`（reset_db 和 check_all）。
+    - 这些子进程都不调用 LLM，所以拿不到任何 key。
+  - **gen 步骤**：这些步骤都调用 LLM，其中 `gen env` 与 `gen verifier` 还会执行自己生成的代码（`awm/core/env.py:161-172`、`awm/core/verifier.py:104`）。`SynthRunner.step_env` 只在白名单之上加 LLM 设置：
+    - 经本地代理时（`workbench synth run --execute` 总是经代理），只加占位 key `workbench-proxy`、代理地址和 `AWM_SYN_OVERRIDE_MODEL`；上游 key 留在 workbench 进程中的代理线程里。步骤只连本机代理，所以也不传出站代理变量。
+    - 不经代理时（只能在 Python 中直接调用 `execute(proxy_base=None)`），加 `LLM_VARS` 与 `NETWORK_VARS`：
+      - `LLM_VARS`：AWM 读取的 LLM 变量（`awm/gpt.py:38-55`、`awm/tools.py:407-432`、`awm/core/scenario.py:63-84`）；
+      - `NETWORK_VARS`：出站代理与 CA 设置。
+  - **为什么这些变量就够**：
+    - `PATH` 必需：AWM 用 `sh` 管道把 server 输出交给 `tee`（`awm/core/server.py:163`）。
+    - 解释器是 `sys.executable`，即 venv 中的 python，不依赖 `VIRTUAL_ENV` 或 `PYTHONPATH`。
+    - `PORT` 与 `DATABASE_PATH` 由 AWM 启动器自己设置（`awm/core/server.py:157-158`）。
+    - 不传 `HOME`：运行不需要它，子进程需要时仍能从 passwd 查到家目录。
+  - **附带效果**：以前父进程若设置了 `HOST`，会覆盖 `--host`，因为生成代码读的是 `os.environ.get('HOST', ...)`（`awm/core/server.py:114`）。现在 `--host` 总是生效。
+  - **不在范围内**：只执行固定命令的子进程仍继承完整环境，包括 `git rev-parse`、`nvidia-smi` 与 train 环境的版本探针。
+- **验证**（2026-09-24，CPU）：
+  - `tests/unit/test_subprocess_env.py`：
+    - 真实子进程在旧的 `dict(os.environ)` 交接下能看到植入的 `DEEPSEEK_API_KEY`（对照组）；
+    - 在白名单下看不到任何 `*_API_KEY` 或其它像密钥的名字，也看不到植入的值和白名单外的变量；
+    - gen 步骤只有占位 key，没有出站代理变量；
+    - reset_db 与 check_all 没有任何 key；`synth validate` 命令也一样。
+  - `tests/unit/test_env_manager.py::test_env_server_process_gets_no_secrets`：检查 env-manager 启动的进程。
+  - `tests/integration/test_env_real_awm.py::test_env_server_process_tree_sees_no_secrets`：
+    - 对真实 AWM 启动器、`sh`、`tee` 与生成的 server 所在的进程组，逐个读取 `/proc/<pid>/environ`；
+    - 同时确认服务仍然健康，7 个工具都在；
+    - 这些进程里另有三个非密钥变量：`PORT`、`DATABASE_PATH`，以及启动器 import scikit-learn 时设置的两个 `KMP_*`（`sklearn/__init__.py:56,60`，经由 `mcp_agent/workflows/embedding/embedding_base.py:6`）。
+  - **负对照**：把 manager 临时改回 `dict(os.environ)` 后，上面两条测试都失败。
+  - 白名单环境下，真实的 `awm env reset_db` + `check_all`（`tests/integration/test_synth_validate_real_awm.py`）和官方场景的启动测试（`official_data`）都通过。
+- **代价与限制**：
+  - 白名单固定，没有配置开关（按要求不加功能）。某个部署如果确实需要额外变量，只能改代码。
+  - 只隔离环境变量：子进程与 workbench 以同一用户运行，仍能读取该用户可读的文件，例如 `.env`、`~/.aws/credentials`。要做到这一点需要另一个用户或容器沙箱，本 ADR 未做。
+  - `gen env` 与 `gen verifier` 的生成代码：
+    - 经代理时仍能看到占位 key 和代理地址，可以经代理发起 LLM 调用（会产生费用，并记入账本），但拿不到上游 key；
+    - 不经代理时会看到真实的 `OPENAI_API_KEY`。
+    - 不改上游就无法把这两个步骤的"调用 LLM"和"执行生成代码"分开。
+  - `awm verify` 无法隔离：它在同一进程里执行 verifier 代码（`awm/core/verify.py:104-126`、`:151-174`，namespace 中直接提供了 `os`），又用环境中的 key 调用裁判（`:230-302`、`:419-421`）。不改上游就无法隔离，见 LIMITATIONS。
+  - `awm agent --scenario` 自动起服时，server 继承 `awm agent` 的环境（`awm/core/server.py:174-195` 的 `Popen` 没有传 `env=`）。本仓库只用 `--mcp_url` 模式连接 env-manager 启动的 server。

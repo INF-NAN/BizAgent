@@ -433,13 +433,11 @@ def synth_run(
 @synth_app.command("validate")
 def synth_validate(run_dir: Path) -> None:
     """Run `awm env reset_db` + `awm env check_all` on a synthesized run and write the report."""
-    import os
-
+    from workbench.subprocess_env import generated_code_env
     from workbench.synth.runner import default_command_runner, validate_run
 
-    env = dict(os.environ)
-    env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
-    report = validate_run(run_dir, default_command_runner, env)
+    # Both run generated code and call no LLM: allowlisted variables only (ADR-019).
+    report = validate_run(run_dir, default_command_runner, generated_code_env())
     console.print_json(data=report.as_dict())
 
 

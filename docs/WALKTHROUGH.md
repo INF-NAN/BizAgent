@@ -62,10 +62,10 @@ stopped wt1
 阅读：
 
 - `src/workbench/envs/awm_adapter.py`：如何调用 AWM 建库与启动 server，为什么必须显式传 `--db_path`、`--temp_server_path`、`--output_dir`（`docs/RECON.md` §1）；
-- `src/workbench/envs/manager.py`：进程组启动与 `killpg`、健康检查截止时间、排队信号量、空闲回收；
+- `src/workbench/envs/manager.py`：进程组启动与 `killpg`、健康检查截止时间、排队信号量、空闲回收；server 执行生成代码，只拿到白名单中的环境变量（`src/workbench/subprocess_env.py`，ADR-019）；
 - `src/workbench/envs/snapshot.py`：快照、恢复、按主键的表级 diff；
 - `src/workbench/envs/service.py`、`envs/http.py`：本地与远程两种 env 服务；
-- 测试：`tests/unit/test_env_manager.py`、`tests/integration/test_env_real_awm.py`（真实启动 AWM server）。
+- 测试：`tests/unit/test_env_manager.py`、`tests/unit/test_subprocess_env.py`、`tests/integration/test_env_real_awm.py`（真实启动 AWM server，并检查进程组中没有任何 key）。
 
 ## 2. 合成：编排 AWM 的生成流水线
 
@@ -95,7 +95,7 @@ dry-run 不创建任何目录。
 
 阅读：
 
-- `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；
+- `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；各步骤的环境变量（gen 步骤只拿到占位 key，reset_db 与 check_all 不拿任何 key，ADR-019）；
 - `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账），真实 key 只在代理中；
 - `src/workbench/synth/validate.py`：`awm env check_all` 结果的分类报告；
 - `configs/pricing.yaml`（占位价格）；

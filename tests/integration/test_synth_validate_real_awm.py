@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 
 import pytest
 
 from tests.integration.conftest import MINI
+from workbench.subprocess_env import generated_code_env
 from workbench.synth.runner import default_command_runner, validate_run
 
 pytestmark = pytest.mark.integration
@@ -25,9 +25,8 @@ def test_validate_run_on_generated_like_dir(tmp_path: Path) -> None:
         run / "databases" / "mini_e_commerce.db"
     )  # as `awm gen env --database_dir` writes it
     (run / "gen_envs.jsonl").write_text(json.dumps(env_row) + "\n")
-    env = dict(os.environ)
-    env.setdefault("PYTHONPYCACHEPREFIX", str(Path(".cache/pycache").resolve()))
-    report = validate_run(run, default_command_runner, env).as_dict()
+    # the allowlisted environment (ADR-019) is enough for real reset_db + check_all
+    report = validate_run(run, default_command_runner, generated_code_env()).as_dict()
     assert report["environments_total"] == 1
     assert report["environments_started"] == 1 and report["tools_total"] == 7
     assert (run / "validation.md").exists() and (run / "databases" / "mini_e_commerce.db").exists()

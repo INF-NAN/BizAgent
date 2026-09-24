@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import socket
@@ -13,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from tests.unit.secrets_harness import PROBE, leaked, plant, unexpected
 from workbench.config import EnvSettings
 from workbench.envs.health import HealthResult
 from workbench.envs.manager import (
@@ -212,3 +214,26 @@ def test_signal_handler_installed(tmp_path: Path) -> None:
         assert signal.getsignal(signal.SIGTERM) is not before
     finally:
         signal.signal(signal.SIGTERM, before)
+
+
+async def test_env_server_process_gets_no_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    plant(monkeypatch)
+    out = tmp_path / "view.json"
+    script = (  # the "server": records what it sees (atomically), then stays up
+        "import contextlib, io, os, time\n"
+        "buf = io.StringIO()\n"
+        f"with contextlib.redirect_stdout(buf): exec({PROBE!r})\n"
+        f"with open({str(out)!r} + '.tmp', 'w') as f: f.write(buf.getvalue())\n"
+        f"os.replace({str(out)!r} + '.tmp', {str(out)!r})\n"
+        "time.sleep(60)\n"
+    )
+    m = make(tmp_path, script)
+    await m.start("scn", session_id="s-env")
+    for _ in range(200):
+        if out.exists():
+            break
+        await asyncio.sleep(0.05)
+    await m.stop_all()
+    view = json.loads(out.read_text())
+    assert leaked(view["names"]) == [] and not view["planted"]
+    assert unexpected(view["names"]) == []
