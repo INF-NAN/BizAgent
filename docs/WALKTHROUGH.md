@@ -102,8 +102,38 @@ dry-run 不创建任何目录。
 - `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；各步骤的环境变量（gen 步骤只拿到占位 key，reset_db 与 check_all 不拿任何 key，ADR-019）；
 - `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账），真实 key 只在代理中；
 - `src/workbench/synth/validate.py`：`awm env check_all` 结果的分类报告；
-- `configs/pricing.yaml`（占位价格）；
+- `configs/pricing.yaml`（DeepSeek `deepseek-flash` 的官方高峰价，账本按它计算上界费用）；
 - 测试：`tests/unit/test_synth.py`、`tests/integration/test_synth_validate_real_awm.py`。
+
+### 2.1 真实执行一次（Phase 13，工程事实）
+
+DeepSeek 没有 embedding 端点，所以按仓库主人的决定 D5，用 1 条手写的企业类场景 `local_it_service_desk` 从 `gen task` 开始。环境变量只在进程里设置：
+
+- `OPENAI_API_KEY="$DEEPSEEK_API_KEY"`；
+- `OPENAI_BASE_URL=https://api.deepseek.com`；
+- `AWM_SYN_OVERRIDE_MODEL=deepseek-flash`。
+
+```bash
+workbench synth run --scenarios 1 --out data/synth/p13_it_service_desk \
+  --scenario-file data/synth/p13_it_service_desk/local_scenario.jsonl --execute
+```
+
+第 1 次运行中，6 个 gen 步骤都一次成功，之后在收尾验证阶段被故意中断。用同一命令续跑（2026-09-24 21:04:54 UTC）的输出结尾：
+
+```
+  "validation": {
+    "environments_total": 1,
+    "environments_started": 1,
+    "environments_failed": 0,
+    "tools_total": 15,
+    ...
+real	0m10.034s
+exit=0
+```
+
+续跑时 6 个步骤都按 checkpoint 跳过，没有发出 LLM 请求。账本共 15 个上游响应：输入 88,523 token，输出 130,867 token，上界口径 ¥1.2240。缓存命中另用一次不带 key 的重放验证。
+
+完整过程、中断的实际情况与清理：`docs/verification/2026-09-24-synth.md`。合成出的环境只在 `data/synth/`，不入库，不用于训练，也不与官方数据混合（ADR-011）。
 
 ## 3. 服务：模型服务与 LLM 客户端
 
