@@ -1,0 +1,8 @@
+[submodule "third_party/agent-world-model"]
+	path = third_party/agent-world-model
+	url = https://github.com/Snowflake-Labs/agent-world-model
+	shallow = true
+[submodule "third_party/AgentFly"]
+	path = third_party/AgentFly
+	url = https://github.com/Agent-One-Lab/AgentFly
+	shallow = true
