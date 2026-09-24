@@ -15,8 +15,8 @@
 | Agent-One-Lab/AgentFly | `third_party/AgentFly`（git submodule，`shallow = true`） | `1256586b1109ba8e0dc0f179f8515b4567d09df4`（2026-05-06） | 已初始化；未改动 |
 | └ Agent-One-Lab/verl（AgentFly 嵌套的 veRL fork） | `third_party/AgentFly/verl`（AgentFly 内的 gitlink，SSH URL） | `001f000ae2e4cf05bb94c01427898cbe68961141`（2026-05-05） | 暂不初始化（Phase 7 需要时再初始化） |
 | meta-pytorch/OpenEnv | 未纳入 | 侦察所用版本：`e401886d23aab1be92493ea15e5d7e2cdf7e657b`（2026-09-23） | 仅作参考，RECON 中以永久链接引用（理由见 RECON §3.4） |
-| HF 数据集 `Snowflake/AgentWorldModel-1K` | 不入库；将来由下载脚本放到 `data/awm1k/`（gitignored） | — | 本环境无法访问 `huggingface.co` |
-| HF 模型 `Snowflake/Arctic-AWM-4B/8B/14B` | 不入库；由 vLLM 在运行时拉取 | — | 本环境无法访问 `huggingface.co` |
+| HF 数据集 `Snowflake/AgentWorldModel-1K` | 不入库；由 `make data` 下载到 `data/awm1k/`（gitignored） | HF 仓库最新提交（下载时记录于 `data/awm1k/MANIFEST.json`） | CC-BY-4.0，已于 2026-09-24 核实 |
+| HF 模型 `Snowflake/Arctic-AWM-4B/8B/14B` | 不入库；由 vLLM 在运行时拉取 | 4B `437dfa0`、8B `63ebcb9`、14B `fa3e3b1`（2026-09-24 读取的 HF 提交） | Apache-2.0，已于 2026-09-24 核实 |
 
 补丁：`patches/` 目前为空，没有对任何上游文件做过改动。
 
@@ -46,7 +46,8 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | 路径 | 内容 |
 |---|---|
 | `.gitmodules` | 子模块声明（URL、路径、`shallow = true`） |
-| `TASK.md`、`CLAUDE.md` | 任务书原文；R1–R14 要点与当前状态 |
+| `TASK.md`、`TASK_v2.md`、`CLAUDE.md` | 任务书原文（Phase 0–8、Phase 9–15）；R1–R14 要点与当前状态 |
+| `docs/verification/**` | Phase 9 起的外部核实记录与真实环境运行日志（N1） |
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
 | `docs/RECON.md` | 上游侦察报告，记录全部"文件:行号" |
 | `docs/UPSTREAM.md` | 本文件 |
@@ -93,9 +94,9 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 
 | 对象 | 许可证 | 证据 | 核实状态 |
 |---|---|---|---|
-| AWM 仓库代码 | **无许可证** | 4 个提交的完整历史中没有 LICENSE / COPYING / NOTICE（`git log --all --diff-filter=AD -- 'LICENSE*' 'COPYING*' 'NOTICE*'` 结果为空）；`pyproject.toml` 没有 `license` 字段；README 没有许可证声明。远端有一个未合并的 PR #17，是第三方贡献者提议加入 MIT LICENSE（2026-09-16），**不构成维护者授权** | 已核实（缺失） |
-| AgentWorldModel-1K（HF 数据集） | **未能确认** | `huggingface.co` 被本环境出口策略拒绝。旁证：OpenEnv 示例 `examples/echo_on_agent_world_model/fixtures/SOURCE.md:9`（@e401886）写有 "CC-BY-4.0"，但这是第三方陈述 | 未核实 |
-| Arctic-AWM-4B / 8B / 14B（HF 模型卡） | **未能确认** | 同上。WebSearch 摘要里没有给出其许可证；摘要对"与其它 Arctic 模型相同"的推测不采信 | 未核实 |
+| AWM 仓库代码 | **无许可证** | 2026-09-24 复查：上游 `HEAD` 仍为 `85e322f`，历史中没有 LICENSE / COPYING / NOTICE；`pyproject.toml` 没有 `license` 字段。第三方贡献者的 PR #17（提议 MIT）仍为 Open、未获批准，**不构成维护者授权**（`docs/verification/2026-09-24-licenses.md`） | 已核实（缺失） |
+| AgentWorldModel-1K（HF 数据集） | **CC-BY-4.0** | 数据集卡 front matter `license: "cc-by-4.0"`（`docs/verification/2026-09-24-licenses.md`） | 已核实（2026-09-24） |
+| Arctic-AWM-4B / 8B / 14B（HF 模型卡） | **Apache-2.0**（三者相同） | 模型卡 front matter `license: apache-2.0`；基座 Qwen3 同为 Apache-2.0（`docs/verification/2026-09-24-model-cards.md`） | 已核实（2026-09-24） |
 | AgentFly | Apache-2.0 | `third_party/AgentFly/LICENSE`（Apache License 2.0 全文）；`third_party/AgentFly/pyproject.toml:31` | 已核实 |
 | veRL（AgentFly 嵌套 fork） | Apache-2.0 | fork @001f000 的 `LICENSE`、`setup.py:85`（`license="Apache 2.0"`）；`Notice.txt`：Copyright 2023-2024 Bytedance Ltd. and/or its affiliates | 已核实 |
 | OpenEnv | BSD-3-Clause | @e401886 的 `LICENSE:1-3`（版权方 Hugging Face, Inc.）；`pyproject.toml:10` | 已核实（未纳入本仓库） |
@@ -115,10 +116,22 @@ git -C third_party/AgentFly status --porcelain            # 应为空
   - 仓库主人未就此答复，按 ADR-003 采用最保守做法：只含 gitlink（指向其公开仓库的指针），不包含 AWM 代码副本，也不做任何 patch；
   - 运行时由使用者自行从 AWM 公开仓库获取代码并在本地执行；README 显著位置写明 AWM 无许可证；
   - 如果 AWM 上游将来加入许可证，需要重新评估本节。
-- **数据集与模型（未核实）**：许可证未能核实（`huggingface.co` 被本环境拦截）。本仓库不包含数据与权重，只提供下载脚本；使用者下载前需自行阅读 HF 页面上的许可证。开发与测试全部基于手写的迷你夹具，不依赖官方数据。
+- **数据集（CC-BY-4.0）与模型（Apache-2.0）**：均允许公开展示与使用。本仓库不包含数据与权重，只提供下载脚本；使用数据集须按 CC-BY-4.0 署名（见 §5）。开发与 CI 测试基于手写的迷你夹具，不依赖官方数据。
 - **AgentFly / veRL（Apache-2.0）、OpenEnv（BSD-3-Clause）**：允许公开展示和使用，分发副本时需要保留版权与许可证声明。本仓库只以 submodule 或链接方式引用，不分发副本。
 
 ## 4. 数据与权重
 
 - 数据集与模型权重**不提交进仓库**（R6），只提供下载脚本（Phase 1 的 `make data`）。
 - 自合成的环境只放在 `data/synth/`，manifest 标记 `origin: local-synth`，与官方数据隔离（R2，Phase 7）。
+
+## 5. 署名（CC-BY-4.0）
+
+本仓库使用的 AgentWorldModel-1K 数据集按 CC-BY-4.0 授权，署名如下：
+
+- **作品**：AgentWorldModel-1K（数据集）
+- **作者**：Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, Zhewei Yao, Huaxiu Yao, Yuxiong He（UNC-Chapel Hill 与 Snowflake AI Research）
+- **相关论文**：*Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning*，arXiv:2602.10090
+- **链接**：https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K
+- **许可证**：Creative Commons Attribution 4.0 International（CC-BY-4.0），https://creativecommons.org/licenses/by/4.0/
+- **改动说明**：本仓库**不分发**该数据集，也不修改它；`make data` 从 Hugging Face 原样下载到本地（`data/awm1k/`，不入库），运行时只读。测试夹具 `tests/fixtures/awm_mini` 中凡是取自官方数据的内容，会在其 MANIFEST 中逐项注明来源与改动。
+

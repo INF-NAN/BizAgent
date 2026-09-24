@@ -1,8 +1,10 @@
 # vLLM serving profile for Arctic-AWM-4B (Phase 4).
 #
-# UNVERIFIED-LOCAL: needs a CUDA GPU and network access to huggingface.co. The Arctic-AWM
-# model card could not be read from the dev sandbox, so the tool-call parser / chat template
-# are NOT set by default: we keep AWM README's minimal command
+# UNVERIFIED-LOCAL: needs a CUDA GPU and network access to huggingface.co. The model card was
+# read on 2026-09-24 (docs/verification/2026-09-24-model-cards.md): Qwen3ForCausalLM,
+# max_position_embeddings 40960, and a chat_template.jinja that asks for Qwen3-style
+# <tool_call>{...}</tool_call> blocks. The card does not name a vLLM tool-call parser, so the
+# parser / chat template are still NOT set by default: we keep AWM README's minimal command
 #   vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000   (AWM README.md:210)
 # The workbench client parses `<tool_call>{...}</tool_call>` from message content (the format
 # AWM's own agent uses, awm/core/agent.py:130-167), so tool calling works without a parser.
