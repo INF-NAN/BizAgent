@@ -1,6 +1,6 @@
 # WALKTHROUGH — 学习路线
 
-面向仓库主人。按"环境 → 合成 → 服务 → 网关 → 智能体 → 训练循环"的顺序，每一步给出命令、预期输出和建议阅读的源文件。所有命令在仓库根目录执行，除第 3、6 步中标注 UNVERIFIED-LOCAL 的部分外，都能在 CPU + mock LLM 下运行。下文的"预期输出"摘自开发沙箱中的实际运行（2026-09-24），会话 ID、端口等随每次运行变化。
+面向仓库主人。按"环境 → 合成 → 服务 → 网关 → 智能体 → 训练循环"的顺序，每一步给出命令、预期输出和建议阅读的源文件。所有命令在仓库根目录执行，除第 3、6 步中标注 UNVERIFIED-LOCAL 的部分外，都能在 CPU + mock LLM 下运行。下文的"预期输出"摘自开发沙箱中的实际运行（2026-09-24），会话 ID、端口等随每次运行变化。第 3.1、5.1、5.2 小节是用 DeepSeek 做的**单次链路演示，不构成评测**：需要 `DEEPSEEK_API_KEY`（外部 API，会产生费用），输出是 2026-09-24 那一次运行的原文节选。
 
 准备：
 
@@ -117,6 +117,29 @@ vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-n
 
 在 GPU 机器上运行 `scripts/serve_vllm.sh`，然后设置 `WORKBENCH_LLM__BACKEND=vllm`（UNVERIFIED-LOCAL：需要 CUDA GPU 和 `huggingface.co` 访问）。
 
+### 3.1 OpenAI 兼容端点：DeepSeek（单次链路演示，不构成评测）
+
+后端只用环境变量配置，key 只从 `DEEPSEEK_API_KEY` 读取，不写入任何文件：
+
+```bash
+export WORKBENCH_LLM__BACKEND=openai_compat WORKBENCH_LLM__BASE_URL=https://api.deepseek.com \
+       WORKBENCH_LLM__MODEL=deepseek-flash WORKBENCH_LLM__API_KEY_ENV=DEEPSEEK_API_KEY
+workbench doctor
+```
+
+2026-09-24 的实际输出（节选）：
+
+```
+│ env-vars                    │ ok     │ backend=openai_compat                                                 │
+│ llm                         │ ok     │ https://api.deepseek.com/models reachable                             │
+```
+
+要点（详见 `docs/verification/2026-09-24-llm-chain.md` §1–2）：
+
+- DeepSeek 在流式响应中返回原生 `tool_calls`，由 `openai_compat.py` 直接解析；不需要走 `<tool_call>` 文本解析。
+- DeepSeek 默认开启思考模式：思考 token 计入输出 token；`temperature` 在思考模式下不生效。
+- DeepSeek 文档要求带 `tools` 的请求回传 `reasoning_content`，本仓库没有回传；2026-09-24 实测仍返回 200。这是外部风险，见 LIMITATIONS §6。
+
 阅读：
 
 - `configs/serving/arctic-awm-4b.yaml`：每个参数都注明了 vLLM v0.19.0 的源码位置；
@@ -188,6 +211,84 @@ make demo-mock          # 打开 http://127.0.0.1:8080/ui/
 在 UI 中：选择场景 → Start isolated session → 发送上面的请求 → 在审批面板点 Approve → 查看 Timeline 与 DB diff 标签页。`scripts/demo_ui_check.py` 用 Playwright 自动走一遍同样的流程。
 
 注意：mock 回答来自手写脚本，不是模型输出，不代表任何模型能力。
+
+### 5.1 真实 LLM：官方 `e_commerce_33` 任务 0（单次链路演示，不构成评测）
+
+在 3.1 的环境变量之外，再放宽两个上限（原因：39 个工具的定义在每次 act 调用中出现两次，约 26K token；DeepSeek 的思考 token 计入输出）：
+
+```bash
+export WORKBENCH_LLM__MAX_TOKENS=8192 WORKBENCH_AGENT__TOKEN_BUDGET=400000
+workbench agent run --scenario e_commerce_33 --approve auto --approver claude-code-operator \
+  "Search for 'wireless noise cancelling headphones', sort results by average customer rating, and add the top-rated item under \$200 to my cart in quantity 1."
+```
+
+2026-09-24 的实际输出（节选；回答全文、trace 与审计见 `docs/verification/logs/2026-09-24-phase12-workbench-agent.log`）：
+
+```
+session 98f642235e74: 39 tools from http://127.0.0.1:18100/mcp
+tool e_commerce_33__search_products -> ok (allowed)
+tool e_commerce_33__list_product_offers -> ok (allowed)
+approval_required e_commerce_33__add_item_to_cart
+approval_granted e_commerce_33__add_item_to_cart
+tool e_commerce_33__add_item_to_cart -> ok (allowed)
+memory_saved headphone_budget
+memory_saved prefers_top_rated
+memory_saved cart_id
+answer Done! Here's a summary: …
+{ "changed": true, ... "cart_items": { "rows_before": 3, "rows_after": 4, "added": [4], ... } }
+```
+
+审批由操作者在运行前决定（`--approve auto`）；闸门本身照常工作：写操作前暂停，记录 `approval_requested` / `approval_granted`，网关凭一次性令牌放行。这一次输出只证明链路打通，不代表任务完成得好不好。
+
+### 5.2 上游 `awm agent` / `awm verify` 与轨迹查看器（单次链路演示，不构成评测）
+
+`awm agent` 用 `--mcp_url` 模式连接 env-manager 启动的会话（`--scenario` 自动起服有上游缺陷，见 LIMITATIONS §6）：
+
+```bash
+workbench env serve &                                   # 控制面
+workbench env up e_commerce_33 --session-id p12awm      # -> http://127.0.0.1:18100/mcp
+OPENAI_API_KEY="$DEEPSEEK_API_KEY" awm agent --scenario e_commerce_33 --task_id 0 \
+  --tasks_path data/awm1k/gen_tasks.jsonl --mcp_url http://127.0.0.1:18100/mcp \
+  --api_url https://api.deepseek.com --model deepseek-flash --output_dir data/p12/awm-agent/e_commerce_33_task_0
+```
+
+2026-09-24 的实际输出（节选）：
+
+```
+--- Iteration 1/30 ---
+Assistant (130 chars): I'll start by listing the available tools in this environment.
+<tool_call>
+{"name": "list_tools", "arguments": null}
+</tool_call>
+--- Iteration 2/30 ---
+Assistant (360 chars): I'll search for the product with the appropriate filters.
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="call_tool">
+…
+Tool calls: 0
+No tool calls detected - task complete.
+```
+
+第 2 轮 DeepSeek 在纯文本中输出了它自己的 DSML 工具调用标记，AWM 只识别 `<tool_call>`，循环在第 2 轮结束，没有写操作（按 D3 如实记录，不改上游）。随后：
+
+```bash
+workbench env down p12awm
+OPENAI_API_KEY="$DEEPSEEK_API_KEY" OPENAI_BASE_URL=https://api.deepseek.com AWM_SYN_OVERRIDE_MODEL=deepseek-flash \
+awm verify --input data/p12/awm-agent/e_commerce_33_task_0 \
+  --init_db_path data/p12/awm-runs/p12awm/initial.db --final_db_path data/p12/awm-runs/p12awm/work.db \
+  --mode sql --verifier_path data/awm1k/gen_verifier.jsonl
+```
+
+实际输出（节选）：
+
+```
+Verifier result: reward_type=incomplete
+Running LLM judge for sql mode...
+LLM judge classification: agent_error
+Saved verification result to data/p12/awm-agent/e_commerce_33_task_0/verify.sql.json
+```
+
+最后在 UI 的 Trajectory viewer 标签页用文件输入框加载这次的 `trajectory.json`，显示 "AWM trajectory · scenario e_commerce_33 · task 0 · 2 iterations" 和两个步骤。以上输出只证明链路打通，裁判的分类不构成评测，也不得汇总成比率。详见 `docs/verification/2026-09-24-llm-chain.md` §4–6。
 
 阅读：
 
