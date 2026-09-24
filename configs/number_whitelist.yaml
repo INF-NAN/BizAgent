@@ -9,7 +9,10 @@ tokens:
   "3.14": Python version (vLLM requires <3.14)
   "0.19": vLLM version (0.19.0)
   "1.26": MCP Python SDK version (1.26.0)
+  "24.04": Ubuntu version (GitHub-hosted runner image ubuntu-24.04, Ubuntu 24.04.5 LTS)
 files:
+  docs/verification/2026-09-24-phase14-synth-resilience.md:
+    "15.69": wall-clock seconds of a pytest run, quoted verbatim from its output (not a metric)
   docs/verification/cost-ledger.md:
     "0.02": DeepSeek off-peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)
     "0.04": DeepSeek peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)

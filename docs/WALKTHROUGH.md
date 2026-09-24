@@ -100,7 +100,7 @@ dry-run 不创建任何目录。
 阅读：
 
 - `src/workbench/synth/runner.py`：步骤计划、`state.json` checkpoint、manifest（`origin: local-synth`）、种子文件复制；各步骤的环境变量（gen 步骤只拿到占位 key，reset_db 与 check_all 不拿任何 key，ADR-019）；
-- `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账），真实 key 只在代理中；
+- `src/workbench/synth/proxy.py`、`synth/ledger.py`：本地 LLM 代理（缓存、重试、按步骤记账、预算熔断），真实 key 只在代理中；
 - `src/workbench/synth/validate.py`：`awm env check_all` 结果的分类报告；
 - `configs/pricing.yaml`（DeepSeek `deepseek-flash` 的官方高峰价，账本按它计算上界费用）；
 - 测试：`tests/unit/test_synth.py`、`tests/integration/test_synth_validate_real_awm.py`。
@@ -134,6 +134,24 @@ exit=0
 续跑时 6 个步骤都按 checkpoint 跳过，没有发出 LLM 请求。账本共 15 个上游响应：输入 88,523 token，输出 130,867 token，上界口径 ¥1.2240。缓存命中另用一次不带 key 的重放验证。
 
 完整过程、中断的实际情况与清理：`docs/verification/2026-09-24-synth.md`。合成出的环境只在 `data/synth/`，不入库，不用于训练，也不与官方数据混合（ADR-011）。
+
+### 2.2 中断、续跑与预算熔断（Phase 14）
+
+- **预算**：
+  - 上限是 `configs/app.yaml` 的 `synth.budget`，默认 ¥5，按 `configs/pricing.yaml` 计价；
+  - 达到上限后，代理拒绝转发（HTTP 402），当前步骤记为失败，CLI 以退出码 1 结束；
+  - 提高上限后用同一命令续跑，例如 `WORKBENCH_SYNTH__BUDGET=8 workbench synth run … --execute`；
+  - 不加 `--execute` 时，输出中的 `budget` 显示上限与已花费（ADR-023）。
+- **中断**：
+  - 按 Ctrl-C 或向 `workbench synth run` 进程发 SIGTERM，runner 会停止当前步骤及其启动的全部进程（包括 AWM 在独立会话中启动的测试 server），把该步记为 `interrupted`，以退出码 130 结束；
+  - 用同一命令续跑。未完成的步骤重做前，输出先移到 `attempts/`（ADR-022）；
+  - AWM 的临时目录 `/tmp/env_test_*` 可能残留，需要手动删除。
+- **阅读**：
+  - `runner.py` 的 `stop_process_tree`、`interruptible`、`_set_aside`、`_budget_block`；
+  - `proxy.py` 的 `over_budget`；
+  - 测试 `tests/unit/test_synth_resilience.py` 与 `tests/unit/synth_harness.py`：真实子进程，假上游监听真实端口，零成本。
+- **零成本验证**：见 `docs/verification/2026-09-24-phase14-synth-resilience.md`，其中用真实 AWM 重做了 Phase 13 的中断。
+- **已知限制**：步骤是否成功只看退出码与输出文件，上游持续出错时步骤仍可能被记为完成（LIMITATIONS §6）。
 
 ## 3. 服务：模型服务与 LLM 客户端
 

@@ -49,6 +49,14 @@ uv run workbench agent run --scenario mini_e_commerce --dataset-dir tests/fixtur
   "Add the best wireless noise cancelling headphones under \$200 to my cart"
 ```
 
+Docker 版本（CPU、mock LLM）：需要 Docker 与 Compose v2，并且检出目录中不能已有 `./data` 与 `.env`。
+
+```bash
+python3 scripts/docker_smoke.py   # 构建 → 启动 env-manager 与 app → 经 HTTP API 走一遍上面的演示 → 停止
+```
+
+GitHub Actions 的 docker-smoke 任务在每次 push 到 `phase9-verification` 与 `main` 时运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
+
 完整学习路线见 [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)。
 
 ## GPU 部署路径（UNVERIFIED-LOCAL）
