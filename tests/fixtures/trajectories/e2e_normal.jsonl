@@ -1,0 +1,5 @@
+{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "e_commerce_33 base tool names (OpenEnv capture, see docs/RECON.md §1.6); prefixed with the demo scenario mini_e_commerce", "purpose": "Phase 5 e2e: normal completion (read only)"}
+{"content": "{\"steps\": [{\"description\": \"Search headphones sorted by rating\", \"tool\": \"mini_e_commerce__search_products\", \"changes_data\": false}, {\"description\": \"Report the top-rated one\", \"tool\": null, \"changes_data\": false}]}", "usage": {"prompt_tokens": 300, "completion_tokens": 60}}
+{"content": "", "tool_calls": [{"id": "c1", "name": "mini_e_commerce__search_products", "arguments": {"query": "Headphones", "sort_by": "rating"}}], "usage": {"prompt_tokens": 400, "completion_tokens": 20}}
+{"content": "The top-rated headphones are 'Wireless Noise Cancelling Headphones B'.", "usage": {"prompt_tokens": 600, "completion_tokens": 25}}
+{"content": "{\"complete\": true, \"missing\": [], \"memories\": []}", "usage": {"prompt_tokens": 500, "completion_tokens": 15}}

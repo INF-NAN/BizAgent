@@ -1,0 +1,6 @@
+{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "e_commerce_33 base tool names (OpenEnv capture, see docs/RECON.md §1.6); prefixed with the demo scenario mini_e_commerce", "purpose": "Phase 5 e2e: invalid plans are fed back and retried (max 2 retries)"}
+{"content": "I think we should just search for it.", "usage": {"prompt_tokens": 300, "completion_tokens": 10}}
+{"content": "{\"steps\": []}", "usage": {"prompt_tokens": 350, "completion_tokens": 5}}
+{"content": "{\"steps\": [{\"description\": \"Answer directly\", \"tool\": null, \"changes_data\": false}]}", "usage": {"prompt_tokens": 400, "completion_tokens": 20}}
+{"content": "The store sells headphones and chargers.", "usage": {"prompt_tokens": 450, "completion_tokens": 12}}
+{"content": "{\"complete\": true, \"missing\": [], \"memories\": []}", "usage": {"prompt_tokens": 300, "completion_tokens": 10}}

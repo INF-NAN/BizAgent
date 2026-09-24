@@ -1,0 +1,5 @@
+{"_fixture": "手写夹具，非模型输出 (hand-written fixture, NOT model output)", "scenario_tools_from": "e_commerce_33 base tool names (OpenEnv capture, see docs/RECON.md §1.6); prefixed with the demo scenario mini_e_commerce", "purpose": "Phase 5 e2e: consecutive steps without any state change -> no_state_change termination"}
+{"content": "{\"steps\": [{\"description\": \"Search variants\", \"tool\": \"mini_e_commerce__search_products\", \"changes_data\": false}]}", "usage": {"prompt_tokens": 300, "completion_tokens": 30}}
+{"content": "", "tool_calls": [{"id": "c1", "name": "mini_e_commerce__search_products", "arguments": {"query": "zzz1"}}], "usage": {"prompt_tokens": 400, "completion_tokens": 15}}
+{"content": "", "tool_calls": [{"id": "c2", "name": "mini_e_commerce__search_products", "arguments": {"query": "zzz2"}}], "usage": {"prompt_tokens": 420, "completion_tokens": 15}}
+{"content": "", "tool_calls": [{"id": "c3", "name": "mini_e_commerce__search_products", "arguments": {"query": "zzz3"}}], "usage": {"prompt_tokens": 440, "completion_tokens": 15}}
