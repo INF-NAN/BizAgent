@@ -20,7 +20,9 @@ make doctor     # 缺少官方数据集和 GPU 只会给出 warn，不算失败
 │ llm                         │ ok     │ mock_replay fixture …                 │
 ```
 
-在没有官方数据集的情况下，下面统一使用手写的迷你场景 `tests/fixtures/awm_mini`（按 AWM 数据格式编写的 7 个工具的迷你电商，不是官方数据）。
+下面默认使用手写的迷你场景 `tests/fixtures/awm_mini`（按 AWM 数据格式编写的 7 个工具的迷你电商，不是官方数据；工具名与参数已于 2026-09-24 与官方 `e_commerce_33` 对账，见 `docs/verification/2026-09-24-fixture-reconciliation.md`）。
+
+如果已用 `make data` 下载官方数据集，可以把命令中的 `mini_e_commerce` 换成官方场景（例如 `e_commerce_33`），并去掉 `--dataset-dir` 参数：`workbench env up e_commerce_33` 启动后 `list_tools` 返回 39 个工具（`docs/verification/2026-09-24-dataset.md`）。
 
 先读：`TASK.md`（任务书）、`CLAUDE.md`（规则摘要）、`docs/RECON.md`（上游事实与行号）、`docs/ARCHITECTURE.md`。
 
@@ -47,7 +49,7 @@ workbench env down wt1
 
 ```
 │ scenario        │ tools │ tasks │ tables │
-│ mini_e_commerce │ 7     │ 2     │ 3      │
+│ mini_e_commerce │ 7     │ 2     │ 6      │
 
 │ session │ scenario        │ state   │ url                    │ tools │
 │ wt1     │ mini_e_commerce │ healthy │ http://127.0.0.1:1810… │ 7     │

@@ -87,7 +87,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `src/workbench/results/*.py` | registry 加载与 RESULTS.md 生成；数字守卫 |
 | `ui/{index.html,app.js,style.css}` | 静态 UI（无构建步骤） |
 | `tests/unit/**`、`tests/integration/**`、`tests/conftest.py` | 测试 |
-| `tests/fixtures/awm_mini/**` | 手写迷你电商场景（按 AWM 数据格式编写，非官方数据） |
+| `tests/fixtures/awm_mini/**` | 手写迷你电商场景（按 AWM 数据格式编写，非官方数据）。7 个工具的名称、参数名、必填字段和顶层返回字段已与官方 `e_commerce_33` 对账并据此修正（CC-BY-4.0 来源与改动说明见其 `MANIFEST.json` 与 `docs/verification/2026-09-24-fixture-reconciliation.md`）；代码与数据均为手写，未复制官方内容 |
 | `tests/fixtures/trajectories/*.jsonl` | 手写 mock LLM 脚本（非模型输出） |
 
 ## 3. 许可证调查（R6）
@@ -133,5 +133,5 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 - **相关论文**：*Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning*，arXiv:2602.10090
 - **链接**：https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K
 - **许可证**：Creative Commons Attribution 4.0 International（CC-BY-4.0），https://creativecommons.org/licenses/by/4.0/
-- **改动说明**：本仓库**不分发**该数据集，也不修改它；`make data` 从 Hugging Face 原样下载到本地（`data/awm1k/`，不入库），运行时只读。测试夹具 `tests/fixtures/awm_mini` 中凡是取自官方数据的内容，会在其 MANIFEST 中逐项注明来源与改动。
+- **改动说明**：本仓库**不分发**该数据集，也不修改它；`make data` 从 Hugging Face 原样下载固定 revision 到本地（`data/awm1k/`，不入库），运行时只读。本仓库只收录了从官方 `e_commerce_33` 整理出的工具名与参数名清单（`docs/verification/e_commerce_33-tools.md`），以及测试夹具中借用的接口命名（来源与改动见 `tests/fixtures/awm_mini/MANIFEST.json`）。
 
