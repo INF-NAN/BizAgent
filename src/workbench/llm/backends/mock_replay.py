@@ -60,7 +60,9 @@ def load_fixture(path: Path) -> tuple[dict[str, Any], list[ChatResult]]:
 class MockReplayBackend:
     name = "mock_replay"
 
-    def __init__(self, fixture: Path | None = None, turns: list[ChatResult] | None = None) -> None:
+    def __init__(
+        self, fixture: Path | None = None, turns: list[ChatResult] | None = None, start_at: int = 0
+    ) -> None:
         if turns is None:
             if fixture is None:
                 raise ValueError("either fixture or turns is required")
@@ -68,7 +70,7 @@ class MockReplayBackend:
         else:
             self.header = {"_fixture": "in-memory"}
         self._turns = list(turns)
-        self._cursor = 0
+        self._cursor = start_at  # >0 simulates a process restart mid-conversation
         self.requests: list[list[Message]] = []
 
     @property
