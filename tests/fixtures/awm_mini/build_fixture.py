@@ -112,7 +112,7 @@ PROVENANCE = {
     "scenarios": [SCENARIO],
     "interface_reconciled_with": {
         "dataset": "Snowflake/AgentWorldModel-1K",
-        "revision": "dde80a0283fe781bdc51656bce57063dc5650213",
+        "revision": "dde80a0283fe781bdc51656bce57063dc5650213",  # pragma: allowlist secret
         "scenario": "e_commerce_33",
         "license": "CC-BY-4.0",
         "attribution": "AgentWorldModel-1K by Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, "

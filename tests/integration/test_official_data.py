@@ -91,7 +91,7 @@ def test_catalog_reads_official_scenarios() -> None:
     assert len(cat) == 1000
     s = cat[SCENARIO]
     assert (s.tools, s.tasks, s.tables) == (39, 10, 19)
-    assert FIXTURE_TOOLS <= set(s.tool_names)
+    assert set(s.tool_names) >= FIXTURE_TOOLS
 
 
 async def test_official_env_starts_and_fixture_matches_its_interface(
@@ -110,7 +110,7 @@ async def test_official_env_starts_and_fixture_matches_its_interface(
         fx = await _schemas(hm.url)
     finally:
         await mini.stop_all()
-    assert set(fx) == FIXTURE_TOOLS and FIXTURE_TOOLS <= set(off)
+    assert set(fx) == FIXTURE_TOOLS and set(off) >= FIXTURE_TOOLS
     for name in FIXTURE_TOOLS:
         fx_props = set((fx[name].get("properties") or {}).keys())
         off_props = set((off[name].get("properties") or {}).keys())
