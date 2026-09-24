@@ -261,9 +261,62 @@ def serve_vllm_cmd(
 
 
 @agent_app.command("run")
-def agent_run() -> None:
-    """Run the agent once."""
-    _not_implemented(5)
+def agent_run(
+    request: str,
+    scenario: str = typer.Option(..., "--scenario"),
+    dataset_dir: Path | None = typer.Option(None, "--dataset-dir"),
+    approve: str = typer.Option("prompt", "--approve", help="prompt | auto | deny"),
+    approver: str = typer.Option("cli-user", "--approver"),
+) -> None:
+    """Run the agent once on a fresh isolated session (mock LLM unless configured otherwise)."""
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from workbench.runtime import Runtime
+
+    base = get_settings()
+    settings = (
+        base
+        if dataset_dir is None
+        else base.model_copy(update={"env": base.env.model_copy(update={"dataset_dir": dataset_dir})})
+    )
+
+    async def go() -> int:
+        settings.agent.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
+        async with AsyncSqliteSaver.from_conn_string(str(settings.agent.checkpoint_db)) as saver:
+            rt = Runtime(settings, checkpointer=saver)
+            try:
+                s = await rt.create_session(scenario)
+                console.print(f"session {s.session_id}: {len(s.tools)} tools from {s.env.url}")
+                assert rt.runner is not None
+                stream = rt.runner.run(s.thread_id, s.session_id, request)
+                while True:
+                    last: dict[str, Any] = {}
+                    async for event in stream:
+                        _print_event(event)
+                        last = event
+                    if last.get("type") != "approval_required":
+                        break
+                    ok = {"auto": True, "deny": False}.get(approve)
+                    if ok is None:
+                        ok = typer.confirm(f"approve {last['tool']} {last['arguments']}?")
+                    decision = {"approved": ok, "approver": approver, "reason": "cli"}
+                    stream = rt.runner.resume(s.thread_id, s.session_id, decision)
+                console.print_json(data=await rt.envs.diff(s.session_id))
+                return 0
+            finally:
+                await rt.aclose()
+
+    raise typer.Exit(code=_run(go()))
+
+
+def _print_event(e: dict[str, Any]) -> None:
+    kind = e.get("type")
+    if kind == "tool_call":
+        console.print(f"[cyan]tool[/] {e['tool']} -> {e['status']} ({e['decision']})")
+    elif kind in ("approval_required", "approval_granted", "approval_rejected", "terminated", "memory_saved"):
+        console.print(f"[yellow]{kind}[/] {e.get('tool') or e.get('key') or e.get('reason')}")
+    elif kind == "done":
+        console.print(f"[green]answer[/] {e['final_answer']}")
 
 
 @api_app.command("serve")

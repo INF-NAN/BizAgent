@@ -122,3 +122,16 @@ def diff(before: Path, after: Path, max_keys: int = 50) -> DbDiff:
                 changed=sorted(changed, key=repr)[:max_keys],
             )
         return result
+
+
+def fingerprint(db_path: Path) -> str:
+    """Stable hash of every row of every table (used as the agent's environment-state probe)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
+        for table in _tables(conn):
+            h.update(table.encode())
+            for row in sorted(repr(r) for r in conn.execute(f'SELECT * FROM "{table}"').fetchall()):
+                h.update(row.encode())
+    return h.hexdigest()[:16]
