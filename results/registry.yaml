@@ -1,111 +1,342 @@
-# results/registry.yaml — DRAFT (Phase 0)
+# results/registry.yaml
 #
 # The ONLY place in this repository where model-performance numbers may live (rule R3).
 # Every value here is a paper-reported number, measured by the official models on the
 # official evaluation harnesses. None of them is a measurement of this repository's
 # application layer (agent, gateway, memory, services), which has never been benchmarked.
 #
-# Phase 0 status:
-#   The arXiv PDF could not be opened: arxiv.org is blocked by this environment's egress
-#   policy (curl: "CONNECT tunnel failed, response 403"; WebFetch: EGRESS_BLOCKED).
-#   Therefore EVERY entry is `verified: false`, and version / table / row / column are
-#   null. The values below were transcribed verbatim from TASK.md section 1.4 and must be
-#   checked cell by cell against the PDF before anything cites them.
+# Phase 10 (2026-09-24): every entry was checked against arXiv 2602.10090 v3, Table 4, in
+# both the HTML rendering and the PDF (page 7); evidence in
+# docs/verification/2026-09-24-paper-table4.md. Only the Base and AWM rows are recorded,
+# for complete rows of the selected columns (no cherry-picking; cells where AWM is below
+# Base are included). The Simulator and EnvScaler rows are deliberately not recorded.
 #
-# Field contract (kept stable for the Phase 8 number guard):
+# Field contract (enforced by src/workbench/results/registry.py):
 #   id            unique key: <benchmark>.<metric>.<size>.<base|awm>
 #   value         number as a float; `printed` keeps the paper's textual precision
-#   source        arxiv_id, version, table, row, column, plus where the value was transcribed from
-#   verified      true only after a human-readable check against the PDF table cell
+#   unit          score | pass rate (%) | success rate (%)
+#   source        arxiv_id, version, table, row, column (+ page, transcribed_from)
+#   verified      true only after a check against the paper table cell; verified entries
+#                 also need verified_by, verified_at and an existing evidence file
 
-schema_version: 1
+schema_version: 2
 
 disclaimer: "论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果。"
 
 paper:
   arxiv_id: "2602.10090"
   title: "Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning"
-  venue_claimed: "ICML 2026 (per upstream README.md:38, not independently verified)"
-  version_checked: null
-  pdf_accessed: false
-  access_note: "arxiv.org blocked by the environment egress policy on 2026-09-24"
+  authors: "Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, Zhewei Yao, Huaxiu Yao, Yuxiong He"
+  venue_claimed: "Accepted to ICML 2026 (arXiv comments field of the abstract page)"
+  version_checked: v3
+  version_date: "2026-05-22"
+  pdf_accessed: true
+  evidence: docs/verification/2026-09-24-paper-table4.md
 
-# Column labels follow TASK.md section 1.4 ("<size> 基座 -> AWM"). The model identities
-# below are the task book's description (section 1.3) and are NOT verified.
+# Notes that must accompany every rendering of these numbers (Table 4 caption and §5.1).
+table_notes:
+  - "Table 4 标题：Results across BFCLv3, τ²-bench, and MCP-Universe benchmarks. Best performance is in bold."
+  - "BFCLv3 的 Hall. 指 hallucination 类别；数值为 BFCLv3 leaderboard 分数。"
+  - "τ²-bench 的 Pass@k 指允许 k 次尝试的任务成功率；Pass@1 为 4 次运行的平均值。"
+  - "MCP-Universe 报告任务成功率；论文排除了需要 GUI 的 3D design 任务，以及需要登录鉴权（GitHub、Notion）的 repository management 任务（§5.1）。"
+  - "Base 行为未经额外训练的 Qwen3 thinking 模型（§5.1）；本表只登记 Base 与 AWM 两行，未登记 Simulator 与 EnvScaler 两个对比基线。"
+
+# Model identities. Evidence: docs/verification/2026-09-24-model-cards.md.
+# `presumed_identity` stays presumed: no model card states that the released checkpoint is
+# the exact model behind the AWM rows of Table 4.
 models:
-  4b.base:  {label: "4B base",  presumed_identity: "Qwen3-4B (thinking)",   verified: false}
-  4b.awm:   {label: "4B AWM",   presumed_identity: "Snowflake/Arctic-AWM-4B",  verified: false}
-  8b.base:  {label: "8B base",  presumed_identity: "Qwen3-8B (thinking)",   verified: false}
-  8b.awm:   {label: "8B AWM",   presumed_identity: "Snowflake/Arctic-AWM-8B",  verified: false}
-  14b.base: {label: "14B base", presumed_identity: "Qwen3-14B (thinking)",  verified: false}
-  14b.awm:  {label: "14B AWM",  presumed_identity: "Snowflake/Arctic-AWM-14B", verified: false}
+  4b.base:
+    label: "4B Base"
+    presumed_identity: "Qwen3-4B thinking model without additional training (paper §5.1: Base = the original LLMs ... without additional training; Qwen3 thinking models across 4B, 8B, 14B as base agents)"
+    verified: false
+  4b.awm:
+    label: "4B AWM"
+    presumed_identity: >-
+      Snowflake/Arctic-AWM-4B (HF sha 437dfa0). Card: apache-2.0, base_model Qwen/Qwen3-4B,
+      "trained with agentic reinforcement learning on Qwen3-4B"; config Qwen3ForCausalLM,
+      max_position_embeddings 40960. The card links the paper but does not say this
+      checkpoint is the Table 4 AWM row.
+    verified: false
+  8b.base:
+    label: "8B Base"
+    presumed_identity: "Qwen3-8B thinking model without additional training (paper §5.1: Base = the original LLMs ... without additional training; Qwen3 thinking models across 4B, 8B, 14B as base agents)"
+    verified: false
+  8b.awm:
+    label: "8B AWM"
+    presumed_identity: >-
+      Snowflake/Arctic-AWM-8B (HF sha 63ebcb9). Card: apache-2.0; text says "trained ... on
+      Qwen3-8B" but the card metadata lists base_model Qwen/Qwen3-4B (inconsistent; config
+      dims hidden_size 4096 / 36 layers match an 8B Qwen3); max_position_embeddings 40960.
+      No statement that it is the Table 4 AWM row.
+    verified: false
+  14b.base:
+    label: "14B Base"
+    presumed_identity: "Qwen3-14B thinking model without additional training (paper §5.1: Base = the original LLMs ... without additional training; Qwen3 thinking models across 4B, 8B, 14B as base agents)"
+    verified: false
+  14b.awm:
+    label: "14B AWM"
+    presumed_identity: >-
+      Snowflake/Arctic-AWM-14B (HF sha fa3e3b1). Card: apache-2.0; text says "trained ... on
+      Qwen3-14B" but the card metadata lists base_model Qwen/Qwen3-4B (inconsistent; config
+      dims hidden_size 5120 / 40 layers match a 14B Qwen3); max_position_embeddings 40960.
+      No statement that it is the Table 4 AWM row.
+    verified: false
 
 entries:
   - id: bfclv3.overall.4b.base
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 4b.base
     value: 54.92
     printed: "54.92"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / Base", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: bfclv3.overall.4b.awm
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 4b.awm
     value: 64.50
     printed: "64.50"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / AWM", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: bfclv3.overall.8b.base
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 8b.base
     value: 53.83
     printed: "53.83"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / Base", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: bfclv3.overall.8b.awm
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 8b.awm
     value: 65.94
     printed: "65.94"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / AWM", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: bfclv3.overall.14b.base
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 14b.base
     value: 61.25
     printed: "61.25"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / Base", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: bfclv3.overall.14b.awm
-    benchmark: BFCLv3
-    metric: Overall
+    benchmark: "BFCLv3"
+    metric: "Overall"
     model: 14b.awm
     value: 70.18
     printed: "70.18"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / AWM", column: "BFCLv3 Leaderboard / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.4b.base
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 4b.base
+    value: 73.93
+    printed: "73.93"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / Base", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.4b.awm
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 4b.awm
+    value: 73.70
+    printed: "73.70"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / AWM", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.8b.base
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 8b.base
+    value: 76.42
+    printed: "76.42"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / Base", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.8b.awm
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 8b.awm
+    value: 70.80
+    printed: "70.80"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / AWM", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.14b.base
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 14b.base
+    value: 77.94
+    printed: "77.94"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / Base", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: bfclv3.hall.14b.awm
+    benchmark: "BFCLv3"
+    metric: "Hall."
+    model: 14b.awm
+    value: 78.37
+    printed: "78.37"
+    unit: "score"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / AWM", column: "BFCLv3 Leaderboard / Hall.",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass1.4b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 4b.base
+    value: 15.83
+    printed: "15.83"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / Base", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass1.4b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 4b.awm
+    value: 22.57
+    printed: "22.57"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / AWM", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass1.8b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 8b.base
+    value: 26.44
+    printed: "26.44"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / Base", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass1.8b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 8b.awm
+    value: 33.45
+    printed: "33.45"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / AWM", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass1.14b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@1"
+    model: 14b.base
+    value: 36.69
+    printed: "36.69"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / Base", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: tau2.pass1.14b.awm
     benchmark: "tau2-bench"
@@ -113,46 +344,191 @@ entries:
     model: 14b.awm
     value: 39.03
     printed: "39.03"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / AWM", column: "tau2-bench / Overall / Pass@1",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.4b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 4b.base
+    value: 34.89
+    printed: "34.89"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / Base", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.4b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 4b.awm
+    value: 43.89
+    printed: "43.89"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / AWM", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.8b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 8b.base
+    value: 50.72
+    printed: "50.72"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / Base", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.8b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 8b.awm
+    value: 55.40
+    printed: "55.40"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / AWM", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.14b.base
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 14b.base
+    value: 55.40
+    printed: "55.40"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / Base", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: tau2.pass4.14b.awm
+    benchmark: "tau2-bench"
+    metric: "Pass@4"
+    model: 14b.awm
+    value: 57.19
+    printed: "57.19"
+    unit: "pass rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / AWM", column: "tau2-bench / Overall / Pass@4",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: mcp_universe.success.4b.base
+    benchmark: "MCP-Universe"
+    metric: "Overall"
+    model: 4b.base
+    value: 6.15
+    printed: "6.15"
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / Base", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: mcp_universe.success.4b.awm
+    benchmark: "MCP-Universe"
+    metric: "Overall"
+    model: 4b.awm
+    value: 6.70
+    printed: "6.70"
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "4B / AWM", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: mcp_universe.success.8b.base
-    benchmark: MCP-Universe
-    metric: "success rate"
+    benchmark: "MCP-Universe"
+    metric: "Overall"
     model: 8b.base
     value: 6.70
     printed: "6.70"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / Base", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
   - id: mcp_universe.success.8b.awm
-    benchmark: MCP-Universe
-    metric: "success rate"
+    benchmark: "MCP-Universe"
+    metric: "Overall"
     model: 8b.awm
     value: 11.17
     printed: "11.17"
-    unit: unknown
-    source: {arxiv_id: "2602.10090", version: null, table: null, row: null, column: null,
-             transcribed_from: "TASK.md section 1.4 (not yet checked against the PDF)"}
-    verified: false
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "8B / AWM", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
 
-# Cells that TASK.md section 1.4 marks as "待核对" (to be checked), plus the extra cells
-# Phase 0 was asked to read (per-domain / per-category / other base values). None of them
-# could be read because the PDF was inaccessible; no value is recorded for them.
-pending:
-  - benchmark: "tau2-bench"
-    metric: "Pass@1"
-    cells: [4b.base, 4b.awm, 8b.base, 8b.awm, 14b.base]
-    also: "per-domain values (domains to be taken from the paper table)"
-  - benchmark: MCP-Universe
-    metric: "success rate"
-    cells: [4b.base, 4b.awm, 14b.base, 14b.awm]
-    also: "per-category values (categories to be taken from the paper table)"
-  - benchmark: BFCLv3
-    metric: "sub-category columns, if reported"
-    cells: []
-    also: "only Overall is transcribed so far"
+  - id: mcp_universe.success.14b.base
+    benchmark: "MCP-Universe"
+    metric: "Overall"
+    model: 14b.base
+    value: 8.38
+    printed: "8.38"
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / Base", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md
+
+  - id: mcp_universe.success.14b.awm
+    benchmark: "MCP-Universe"
+    metric: "Overall"
+    model: 14b.awm
+    value: 12.29
+    printed: "12.29"
+    unit: "success rate (%)"
+    source: {arxiv_id: "2602.10090", version: v3, table: 4, page: 7,
+             row: "14B / AWM", column: "MCP-Universe / Overall",
+             transcribed_from: "arXiv 2602.10090v3 HTML and PDF, cross-checked cell by cell"}
+    verified: true
+    verified_by: claude-code
+    verified_at: "2026-09-24"
+    evidence: docs/verification/2026-09-24-paper-table4.md

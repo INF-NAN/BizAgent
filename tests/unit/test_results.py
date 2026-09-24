@@ -11,8 +11,15 @@ REG = Path("results/registry.yaml")
 
 def test_registry_contract() -> None:
     reg = load_registry(REG)
-    assert len(reg.entries) == 9 and not any(e.verified for e in reg.entries)
+    assert len(reg.entries) == 30 and all(e.verified for e in reg.entries)
     assert "39.03" in reg.printed_values
+    assert all(e.source["version"] == "v3" and e.source["table"] == 4 for e in reg.entries)
+    # whole rows: every (benchmark, metric) pair has Base and AWM for 4B, 8B and 14B
+    pairs = {(e.benchmark, e.metric) for e in reg.entries}
+    models = {f"{s}.{m}" for s in ("4b", "8b", "14b") for m in ("base", "awm")}
+    for b, m in pairs:
+        assert {e.model for e in reg.entries if (e.benchmark, e.metric) == (b, m)} == models
+    assert all(Path(e.evidence or "").is_file() for e in reg.entries)
 
 
 @pytest.mark.parametrize(
@@ -21,7 +28,10 @@ def test_registry_contract() -> None:
         (lambda r: r.update(disclaimer="x"), "disclaimer"),
         (lambda r: r["entries"][0]["source"].pop("table"), "source lacks"),
         (lambda r: r["entries"][0].update(verified="no"), "verified must be"),
-        (lambda r: r["entries"][0].update(verified=True), "verified entries need"),
+        (lambda r: r["entries"][0]["source"].update(row=None), "verified entries need"),
+        (lambda r: r["entries"][0].pop("evidence"), "verified entries need"),
+        (lambda r: r["entries"][0].update(evidence="docs/nope.md"), "does not exist"),
+        (lambda r: r["entries"][0].update(unit="percent"), "unit"),
         (lambda r: r["entries"][0].update(printed="1.00"), "printed"),
         (lambda r: r["entries"][1].update(id=r["entries"][0]["id"]), "duplicate"),
     ],
@@ -32,13 +42,24 @@ def test_registry_rejects_bad_entries(tmp_path: Path, mutate, msg: str) -> None:
     p = tmp_path / "r.yaml"
     p.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
     with pytest.raises(RegistryError, match=msg):
-        load_registry(p)
+        load_registry(p, repo_root=Path.cwd())
 
 
 def test_results_md_is_generated_from_registry() -> None:
     rendered = render_results_md(load_registry(REG))
     assert Path("docs/RESULTS.md").read_text(encoding="utf-8") == rendered, "run `make results`"
-    assert DISCLAIMER in rendered and rendered.count("**待核对**") == 9
+    assert DISCLAIMER in rendered and "**待核对**" not in rendered
+    assert rendered.count("| 已核对 |") == 30 and "Pass@1 为 4 次运行的平均值" in rendered
+    assert "否（推定）" in rendered
+
+
+def test_unverified_entries_render_as_pending(tmp_path: Path) -> None:
+    raw = yaml.safe_load(REG.read_text(encoding="utf-8"))
+    raw["entries"][0]["verified"] = False
+    p = tmp_path / "r.yaml"
+    p.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    rendered = render_results_md(load_registry(p, repo_root=Path.cwd()))
+    assert rendered.count("**待核对**") == 1
 
 
 def _scan(tmp_path: Path, text: str) -> list[str]:

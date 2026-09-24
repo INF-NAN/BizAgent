@@ -9,6 +9,8 @@ from typing import Any
 import yaml
 
 SOURCE_KEYS = ("arxiv_id", "version", "table", "row", "column")
+VERIFICATION_KEYS = ("verified_by", "verified_at", "evidence")
+UNITS = ("score", "pass rate (%)", "success rate (%)", "unknown")
 DISCLAIMER = "论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果。"
 
 
@@ -26,6 +28,8 @@ class Entry:
     printed: str
     source: dict[str, Any]
     verified: bool
+    unit: str = "unknown"
+    evidence: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,7 +42,10 @@ class Registry:
         return {e.printed for e in self.entries}
 
 
-def load_registry(path: Path) -> Registry:
+def load_registry(path: Path, repo_root: Path | None = None) -> Registry:
+    """Load and validate the registry; evidence paths resolve against `repo_root`
+    (default: the parent of the registry's `results/` directory)."""
+    root = repo_root if repo_root is not None else path.resolve().parent.parent
     raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
     if raw.get("disclaimer") != DISCLAIMER:
         raise RegistryError("registry disclaimer missing or altered")
@@ -57,6 +64,15 @@ def load_registry(path: Path) -> Registry:
             raise RegistryError(f"{rid}: verified must be true/false")
         if row["verified"] and any(src.get(k) in (None, "") for k in SOURCE_KEYS):
             raise RegistryError(f"{rid}: verified entries need version/table/row/column")
+        if row["verified"]:
+            lacking = [k for k in VERIFICATION_KEYS if not row.get(k)]
+            if lacking:
+                raise RegistryError(f"{rid}: verified entries need {lacking}")
+            if not (root / str(row["evidence"])).is_file():
+                raise RegistryError(f"{rid}: evidence file {row['evidence']} does not exist")
+        unit = str(row.get("unit", "unknown"))
+        if unit not in UNITS:
+            raise RegistryError(f"{rid}: unit {unit!r} not in {UNITS}")
         printed = str(row["printed"])
         if float(printed) != float(row["value"]):
             raise RegistryError(f"{rid}: printed {printed} != value {row['value']}")
@@ -72,6 +88,8 @@ def load_registry(path: Path) -> Registry:
                 printed,
                 src,
                 row["verified"],
+                unit,
+                row.get("evidence"),
             )
         )
     return Registry(raw, entries)
@@ -80,6 +98,8 @@ def load_registry(path: Path) -> Registry:
 def render_results_md(reg: Registry) -> str:
     paper = reg.raw["paper"]
     models = reg.raw["models"]
+    version = paper.get("version_checked")
+    checked = f"{version}（{paper.get('version_date', '?')}）" if version else "未核对（PDF 未能访问）"
     lines = [
         "# RESULTS — 论文报告值（非本仓库测量）",
         "",
@@ -89,10 +109,21 @@ def render_results_md(reg: Registry) -> str:
         "> 本仓库的应用层（智能体、网关、记忆、服务）从未做过任何基准评测。",
         "",
         f"- 论文：arXiv {paper['arxiv_id']} — {paper['title']}",
-        f"- 核对的论文版本：{paper.get('version_checked') or '未核对（PDF 未能访问）'}",
+        f"- 核对的论文版本：{checked}",
+    ]
+    if paper.get("venue_claimed"):
+        lines.append(f"- 发表状态：{paper['venue_claimed']}")
+    if paper.get("evidence"):
+        lines.append(f"- 核对记录：`{paper['evidence']}`")
+    notes = reg.raw.get("table_notes") or []
+    if notes:
+        lines += ["", "## 表注", "", *[f"- {n}" for n in notes]]
+    lines += [
         "",
-        "| 基准 | 指标 | 模型 | 数值 | 来源（版本 / 表 / 行 / 列） | 状态 |",
-        "|---|---|---|---|---|---|",
+        "## 登记的数值",
+        "",
+        "| 基准 | 指标 | 单位 | 模型 | 数值 | 来源（版本 / 表 / 行 / 列） | 状态 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for e in reg.entries:
         s = e.source
@@ -102,16 +133,24 @@ def render_results_md(reg: Registry) -> str:
         status = "已核对" if e.verified else "**待核对**"
         label = models[e.model]["label"]
         src = f"arXiv {s['arxiv_id']}: {where}"
-        lines.append(f"| {e.benchmark} | {e.metric} | {label} | {e.printed} | {src} | {status} |")
+        lines.append(f"| {e.benchmark} | {e.metric} | {e.unit} | {label} | {e.printed} | {src} | {status} |")
+    lines += [
+        "",
+        "## 模型身份（推定）",
+        "",
+        "| 行 | 推定身份与证据 | 身份已确认 |",
+        "|---|---|---|",
+    ]
+    for key, m in models.items():
+        ident = " ".join(str(m.get("presumed_identity", "")).split())
+        lines.append(f"| {m['label']} (`{key}`) | {ident} | {'是' if m.get('verified') else '否（推定）'} |")
     pending = reg.raw.get("pending") or []
     if pending:
         lines += ["", "## 尚未录入的格子", ""]
         for p in pending:
             cells = ", ".join(models[c]["label"] for c in p.get("cells", [])) or "—"
             lines.append(f"- {p['benchmark']} {p['metric']}：{cells}；{p.get('also', '')}")
-    lines += [
-        "",
-        "`待核对`：数值转录自任务书 §1.4，尚未对照论文 PDF 的表格逐格核实（本开发环境无法访问 arxiv.org）。",
-        "",
-    ]
+    if any(not e.verified for e in reg.entries):
+        lines += ["", "`待核对`：数值尚未对照论文表格逐格核实。"]
+    lines.append("")
     return "\n".join(lines)
