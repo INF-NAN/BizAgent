@@ -3,6 +3,9 @@
 # network access to huggingface.co. vLLM lives in the separate train env (rule R11), so this
 # runs `vllm` from train/.venv (install it first: `cd train && uv sync`), or pass --docker to
 # use the official vllm/vllm-openai image instead.
+# The flags come from the profile; configs/serving/arctic-awm-4b.yaml enables
+# --enable-auto-tool-choice --tool-call-parser hermes (owner decision D11, ADR-020), which the
+# workbench agent's native-`tools` requests need; unverified on a GPU until Phase 15.
 set -euo pipefail
 PROFILE="${PROFILE:-configs/serving/arctic-awm-4b.yaml}"
 MODE="${1:-local}"

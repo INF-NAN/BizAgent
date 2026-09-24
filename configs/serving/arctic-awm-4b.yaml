@@ -1,17 +1,19 @@
-# vLLM serving profile for Arctic-AWM-4B (Phase 4).
+# vLLM serving profile for Arctic-AWM-4B (Phase 4; tool parser enabled after Phase 12.5).
 #
-# UNVERIFIED-LOCAL: needs a CUDA GPU and network access to huggingface.co. The model card was
-# read on 2026-09-24 (docs/verification/2026-09-24-model-cards.md): Qwen3ForCausalLM,
-# max_position_embeddings 40960, and a chat_template.jinja that asks for Qwen3-style
-# <tool_call>{...}</tool_call> blocks. The card does not name a vLLM tool-call parser, so the
-# parser / chat template are still NOT set by default: we keep AWM README's minimal command
-#   vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000   (AWM README.md:210)
-# The workbench client parses `<tool_call>{...}</tool_call>` from message content (the format
-# AWM's own agent uses, awm/core/agent.py:130-167). That is enough for requests WITHOUT `tools`
-# (e.g. `awm agent`). The workbench agent's act requests carry native `tools`, and vLLM v0.19.0
-# rejects those unless --enable-auto-tool-choice and --tool-call-parser are set (tool_choice
-# defaults to "auto": chat_completion/protocol.py:640-643; check: serve/render/serving.py:197-215).
-# See docs/LIMITATIONS.md U1; not changed here because it cannot be verified without a GPU.
+# UNVERIFIED-LOCAL: needs a CUDA GPU and network access to huggingface.co; to be checked on a GPU
+# in Phase 15. The model card was read on 2026-09-24 (docs/verification/2026-09-24-model-cards.md):
+# Qwen3ForCausalLM, max_position_embeddings 40960.
+#
+# Tool calling (owner decision D11, docs/DECISIONS.md ADR-020; sources in docs/RECON.md):
+# - the model's chat_template.jinja (revision 437dfa0) asks for, and renders, tool calls as
+#   <tool_call>\n{"name": ..., "arguments": {...}}\n</tool_call> (template lines 11 and 65-73);
+# - vLLM v0.19.0's `hermes` parser extracts exactly that: JSON objects with "name" and
+#   "arguments" between <tool_call> tags (tool_parsers/hermes_tool_parser.py:61-66, 106-126);
+# - the workbench agent's act requests carry native `tools`, which vLLM rejects unless
+#   --enable-auto-tool-choice and --tool-call-parser are set (render/serving.py:197-215);
+# - requests WITHOUT `tools` (e.g. `awm agent`'s <tool_call> text protocol) keep tool_choice
+#   "none" (chat_completion/protocol.py:175-181, 642-643), so the parser never runs on them and
+#   the <tool_call> text stays in `content` (chat_completion/serving.py:1476-1479, 1752-1757).
 # Values below were checked against vLLM v0.19.0 source (commit 2a69949, docs/RECON.md §10).
 model: Snowflake/Arctic-AWM-4B
 served_model_name: Snowflake/Arctic-AWM-4B
@@ -21,13 +23,12 @@ port: 8000
 max_model_len: null
 # vLLM default is 0.9 (vllm/config/cache.py:41); kept explicit so it is visible
 gpu_memory_utilization: 0.9
-# Tool-calling flags. Leave disabled until the model card confirms the format.
-# `hermes` is registered in vLLM v0.19.0 (vllm/tool_parsers/__init__.py:61) and parses
-# <tool_call>…</tool_call> (hermes_tool_parser.py:61-65); `qwen3` is a registered reasoning
-# parser (vllm/reasoning/__init__.py:83). --enable-auto-tool-choice requires a parser
-# (vllm/entrypoints/openai/cli_args.py:364).
-enable_auto_tool_choice: false
-tool_call_parser: null        # e.g. hermes (unverified for this model)
-reasoning_parser: null        # e.g. qwen3 (unverified for this model)
+# Tool-calling flags (D11). `hermes` is registered in vLLM v0.19.0 (vllm/tool_parsers/__init__.py:61-64);
+# --enable-auto-tool-choice requires a parser (vllm/entrypoints/openai/cli_args.py:363-364).
+enable_auto_tool_choice: true
+tool_call_parser: hermes
+# Not set (not part of D11): thinking text stays in `content` and the workbench client strips it.
+# `qwen3` is a registered reasoning parser (vllm/reasoning/__init__.py:83), unverified for this model.
+reasoning_parser: null
 chat_template: null           # use the model's own template
 extra_args: []

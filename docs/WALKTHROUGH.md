@@ -112,8 +112,10 @@ workbench serve vllm-cmd                  # 只打印命令
 预期输出：
 
 ```
-vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-name Snowflake/Arctic-AWM-4B --gpu-memory-utilization 0.9
+vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-name Snowflake/Arctic-AWM-4B --gpu-memory-utilization 0.9 --enable-auto-tool-choice --tool-call-parser hermes
 ```
+
+最后两个参数自 2026-09-24 起由 profile 启用（仓库主人的决定 D11，ADR-020）：智能体的 act 请求带原生 `tools`，vLLM 需要 tool parser 才接受；不带 `tools` 的请求（如 `awm agent`）不经过 parser。依据是读源码，尚未在 GPU 上验证。
 
 在 GPU 机器上运行 `scripts/serve_vllm.sh`，然后设置 `WORKBENCH_LLM__BACKEND=vllm`（UNVERIFIED-LOCAL：需要 CUDA GPU 和 `huggingface.co` 访问）。
 

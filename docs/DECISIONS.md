@@ -315,3 +315,31 @@
     - 不改上游就无法把这两个步骤的"调用 LLM"和"执行生成代码"分开。
   - `awm verify` 无法隔离：它在同一进程里执行 verifier 代码（`awm/core/verify.py:104-126`、`:151-174`，namespace 中直接提供了 `os`），又用环境中的 key 调用裁判（`:230-302`、`:419-421`）。不改上游就无法隔离，见 LIMITATIONS。
   - `awm agent --scenario` 自动起服时，server 继承 `awm agent` 的环境（`awm/core/server.py:174-195` 的 `Popen` 没有传 `env=`）。本仓库只用 `--mcp_url` 模式连接 env-manager 启动的 server。
+
+## ADR-020 Arctic-AWM 的 vLLM serving profile 启用 `hermes` tool parser
+
+- **背景**：
+  - 智能体的 act 请求一直带原生 `tools`。按 vLLM v0.19.0 源码，这样的请求在服务端没有开启 `--enable-auto-tool-choice` 和 `--tool-call-parser` 时会被直接拒绝（ADR-018，LIMITATIONS U1）。
+  - 模型卡没有指定 parser，所以此前的 serving profile 两项都没有设置。
+  - 仓库主人在 Phase 12.5 报告之后决定启用 `hermes`，只改 `configs/serving/arctic-awm-4b.yaml` 与 serve 脚本（`user-decisions.md` D11）。
+- **依据**（都是源码事实，文件:行号见 RECON "Phase 12.5 报告之后"一节）：
+  - **模板要求的格式**：`Snowflake/Arctic-AWM-4B` @ `437dfa0` 的 `chat_template.jinja`（md5 `da05f6b8…`，与 2026-09-24 读取的模型卡一致）：
+    - 带 `tools` 时，system prompt 要求模型输出 `<tool_call>\n{"name": <function-name>, "arguments": <args-json-object>}\n</tool_call>`（第 11 行）；
+    - 历史中的工具调用也按同一格式渲染（第 65-73 行）；
+    - `tokenizer_config.json` 中 `<tool_call>` 与 `</tool_call>` 是 id 151657 与 151658 的 added token，`special: false`，所以默认解码（`skip_special_tokens=True`）不会把它们删掉。
+  - **`hermes` parser 解析的格式**（vLLM v0.19.0 `vllm/tool_parsers/hermes_tool_parser.py`）：
+    - 非流式：用正则 `<tool_call>(.*?)</tool_call>|<tool_call>(.*)` 取出标签之间的文本（`:61-66`），按 JSON 读取 `name` 与 `arguments`，`arguments` 再序列化成字符串（`:106-126`）；第一个 `<tool_call>` 之前的文本作为 `content`（`:128`）。
+    - 流式：同样按标签切分，用 `"name"` 与 `"arguments"` 取值（`:160-208`）。
+    - 这与上面的模板格式一致。`hermes` 已在 `vllm/tool_parsers/__init__.py:61-64` 注册；该版本的 parser 只做文本匹配，不要求这两个标签在词表中。
+  - **不带 `tools` 的请求不受影响**：
+    - **`tool_choice` 保持 `"none"`**：`ChatCompletionRequest.tool_choice` 默认为 `"none"`（`chat_completion/protocol.py:175-181`），只有带 `tools` 时才改成 `"auto"`（`:642-643`）。
+    - **预处理不调用 parser**：`tool_choice` 为 `"none"` 时，预处理不调用 parser 的 `adjust_request`（`serve/render/serving.py:534-550`）。
+    - **非流式不解析**：自动解析的条件是 `tool_choice` 为 `"auto"` 或 `None`（`engine/serving.py:920-924`），所以不会解析，消息原样返回 `content`（`chat_completion/serving.py:1476-1479`）。
+    - **流式不创建 parser**：流式要求 `request.tools` 非空才创建 parser（`chat_completion/serving.py:532-535`、`:559-571`、`:1752-1757`）。
+    - **`awm agent` 正是这种请求**：它只发 `model`、`messages`、`max_completion_tokens`、`temperature` 和 vLLM 的 `extra_body`，不带 `tools`，也不带 `tool_choice`（`awm/core/agent.py:367-381`）。所以它的 `<tool_call>` 文本协议照旧留在 `content` 里，由 AWM 自己解析（`awm/core/agent.py:130-167`）。
+  - **workbench 的处理**：`openai_compat` 后端（`vllm` 后端复用它）收到原生 `tool_calls` 时直接使用，并从 `content` 中去掉 `<think>`；没有原生调用时再从正文解析 `<tool_call>`（`src/workbench/llm/backends/openai_compat.py:187-198`）。启用 parser 后，act 请求得到的是原生调用，不需要改代码。
+- **决定**：`configs/serving/arctic-awm-4b.yaml` 设 `enable_auto_tool_choice: true`、`tool_call_parser: hermes`；`reasoning_parser` 与 `chat_template` 仍不设置。`workbench serve vllm-cmd` 与 `scripts/serve_vllm.sh` 从 profile 生成参数，现在包含 `--enable-auto-tool-choice --tool-call-parser hermes`。serve 脚本只更新了注释。
+- **代价与未验证项（UNVERIFIED-LOCAL，留到 Phase 15 在 GPU 上验证）**：
+  - 以上都是读源码得到的结论，没有在真实服务上运行过。
+  - 没有设置 reasoning parser，思考内容（`<think>…</think>`）留在 `content` 中，由 workbench 客户端去掉。如果模型在思考内容里写出了 `<tool_call>` 标签，parser 会把它当成工具调用；`qwen3` reasoning parser 可以把思考内容分出去，但不在 D11 的范围内，也未验证。
+  - `docker-compose.yml` 的 `vllm` 服务命令是写死的（第 54 行），不读 profile，仍然没有这两个参数。按 D11 只改 profile 与 serve 脚本，未改 compose；compose 中的 vLLM 服务需要同样的处理才能服务 act 请求（LIMITATIONS U1）。
