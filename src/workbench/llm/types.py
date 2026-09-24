@@ -36,6 +36,9 @@ class ChatResult:
     usage: Usage = field(default_factory=Usage)
     model: str = ""
     finish_reason: str | None = None
+    # Chain of thought returned next to content by thinking-mode servers (DeepSeek); the agent
+    # does not use it, the LLM layer passes it back on later tool requests (ADR-017).
+    reasoning_content: str | None = None
 
 
 class ChatBackend(Protocol):

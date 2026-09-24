@@ -138,14 +138,14 @@ workbench doctor
 
 - DeepSeek 在流式响应中返回原生 `tool_calls`，由 `openai_compat.py` 直接解析；不需要走 `<tool_call>` 文本解析。
 - DeepSeek 默认开启思考模式：思考 token 计入输出 token；`temperature` 在思考模式下不生效。
-- DeepSeek 文档要求带 `tools` 的请求回传 `reasoning_content`，本仓库没有回传；2026-09-24 实测仍返回 200。这是外部风险，见 LIMITATIONS §6。
+- DeepSeek 文档要求带 `tools` 的请求回传此前各轮的 `reasoning_content`。Phase 12.5 起由 LLM 层按文档回传（`src/workbench/llm/reasoning.py`，ADR-017）；文档没写清的情况见 LIMITATIONS §6。
 
 阅读：
 
 - `configs/serving/arctic-awm-4b.yaml`：每个参数都注明了 vLLM v0.19.0 的源码位置；
 - `src/workbench/llm/client.py`：httpx 分阶段超时 + `asyncio.timeout` 墙钟，只对网络错误和 5xx 重试；
 - `src/workbench/llm/backends/openai_compat.py`（流式 SSE）、`backends/mock_replay.py`（手写脚本回放）；
-- `src/workbench/llm/toolcall_parse.py`；
+- `src/workbench/llm/toolcall_parse.py`、`llm/reasoning.py`（按 DeepSeek 文档回传 `reasoning_content`，ADR-017）；
 - 测试：`tests/unit/test_llm_client.py`、`tests/unit/test_mock_replay.py`。
 
 ## 4. 网关：策略、审批、审计

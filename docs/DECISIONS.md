@@ -223,3 +223,29 @@
 - **决定**：选方案 2（仓库主人指定"收紧 PHONE 正则"）。在原正则上加三条限制：匹配不得从单词字符或小数点之后开始（`(?<![\w.])`）；不得紧跟在"数字:"之后开始，排除秒与微秒；不得紧接在":数字"之前结束，排除"日期 小时"。纯日期 `YYYY-MM-DD` 仍由 `_mask_phone` 保留。实现在 `gateway/audit.py`。
 - **验证**：单测覆盖 6 种时间戳写法原样保留，10 种电话写法仍被脱敏（包括 `tel:+1…`、国家码、括号、点号分隔、与时间戳同在一行）；Phase 12 真实工具结果的审计摘要中时间戳保持原样。
 - **代价**：紧跟在"数字:"之后、或后面紧接":数字"的电话号码不再被脱敏（例如 `ext1:5551234567`）；非 ISO 格式的日期（例如 `24.09.2026`）仍可能被当成电话号码。脱敏仍是启发式的，只作用于审计摘要，trace 不做脱敏。
+
+## ADR-017 按 DeepSeek 文档回传 reasoning_content（只改 LLM 层）
+
+- **背景**：
+  - DeepSeek 默认开启思考模式。思考模式指南（`https://api-docs.deepseek.com/guides/thinking_mode`，中文版 `https://api-docs.deepseek.com/zh-cn/guides/thinking_mode`，2026-09-24 18:00 UTC 用 curl 读取）原文：
+    > In thinking mode, the chain-of-thought content is returned via the reasoning_content parameter, at the same level as content.
+    > If the request carries the tools parameter: the reasoning_content of all previous turns should be passed back to the API and will be concatenated into the context.
+    > If the request does not carry the tools parameter: reasoning_content does not need to be passed back; even if passed to the API, it will be ignored
+    > for requests carrying the tools parameter, the reasoning_content must be fully passed back to the API in all subsequent requests — even for turns where the model did not perform a tool call. If your code does not correctly pass back reasoning_content, the API will return a 400 error.
+  - 流式响应里是 `delta.reasoning_content`（API 参考 `https://api-docs.deepseek.com/api/create-chat-completion`，同时读取）。
+  - Phase 12 时本仓库既不保留也不回传它。当时实测 DeepSeek 没有返回 400（探针 P1、P3），但不能依赖这一点。
+- **约束**：仓库主人要求只改 `src/workbench/llm/`，不加 `extra_body` 开关。act 节点自己构造历史消息，只保存 `content` 和 `tool_calls`，LLM 层拿不到智能体状态。
+- **决定**：
+  - 后端从流式的 `delta.reasoning_content` 或非流式的 `message.reasoning_content` 读取思维链，放进 `ChatResult.reasoning_content`，智能体不使用它。
+  - 新增 `llm/reasoning.py` 的 `ReasoningStore`：每得到一个带 `reasoning_content` 的回复，就以"之前的非 system 消息 + 该回复的 content 与第一个工具调用 id"为键记下来。之后的请求**只要携带 `tools`**，就给其中能认出的每条 assistant 消息补上 `reasoning_content`（复制消息，不修改调用方的字典）；不带 `tools` 的请求不补，因为文档说会被忽略。调用方自己带了 `reasoning_content` 的消息保持原样。
+  - 是否回传只取决于服务端有没有返回过 `reasoning_content`，不按 URL 判断，也不加开关。不返回它的服务端（一般的 OpenAI 兼容服务、未启用 reasoning parser 的 vLLM）收到的请求体与原来完全相同。
+  - 识别时不看 system 消息：重新规划会重建 system prompt，而其余历史保持不变。
+- **验证**：单测用一个按文档行为的假服务端，`strict` 模式下对缺少 `reasoning_content` 的带 `tools` 请求返回 400。真实的智能体图对它完整跑通；把回传关掉（负对照）后同一测试失败。其它单测覆盖：流式与非流式读取、只对带 `tools` 的请求回传、没有工具调用的回答轮次也回传、重新规划后仍能回传、未知消息和调用方自带的值不改动、不返回 reasoning 的服务端不会多出字段、容量上限。
+- **文档没写清、因而没有猜测的情况**（记入 LIMITATIONS）：
+  - 没有 `reasoning_content` 的历史轮次该怎么传：非思考模式产生的、来自其它后端的、进程重启后丢失的。本仓库原样发送，不补空值；
+  - API 参考只把请求消息中的 `reasoning_content` 描述为 Chat Prefix Completion（Beta）的输入，与思考模式指南的要求不一致。本仓库按思考模式指南实现。
+- **代价**：
+  - 记录只存在进程内存中：服务重启后从 checkpoint 恢复的会话，历史轮次的 `reasoning_content` 已丢失，按文档可能得到 400，智能体以 `llm_error` 终止；
+  - 每个后端实例最多记 1024 条，按 LRU 淘汰，极长或大量并发的对话可能丢掉较早轮次；
+  - 两个会话的非 system 历史完全相同时（例如同一请求、同一回答、还没有工具调用）共用一条记录；
+  - 多个工具调用的轮次只按第一个调用 id 识别，因为 act 节点只保留第一个调用。

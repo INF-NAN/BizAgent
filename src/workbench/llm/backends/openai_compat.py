@@ -3,6 +3,9 @@
 Layer 1 of the two-layer timeout: httpx phase timeouts (connect / read / write / pool). A
 read timeout alone cannot stop a stream that trickles one byte just before every deadline
 ("half-open" hang); layer 2 — the overall wall-clock cap — lives in ``LLMClient``.
+
+Servers that return ``reasoning_content`` (DeepSeek thinking mode) get it back on later
+requests that carry ``tools``, as their documentation requires (``llm/reasoning.py``, ADR-017).
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from typing import Any
 import httpx
 
 from workbench.llm.errors import LLMRequestError, LLMRetryableError
+from workbench.llm.reasoning import ReasoningStore
 from workbench.llm.toolcall_parse import parse_arguments, parse_tool_calls, strip_think
 from workbench.llm.types import ChatResult, Message, ToolCall, Usage
 
@@ -56,6 +60,7 @@ class OpenAICompatBackend:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, transport=transport
         )
+        self.reasoning = ReasoningStore()
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -67,7 +72,9 @@ class OpenAICompatBackend:
         temperature: float | None,
         max_tokens: int | None,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": self.stream}
+        # Only requests with tools need earlier reasoning back; without tools it is ignored.
+        sent = self.reasoning.attach(messages) if tools else messages
+        payload: dict[str, Any] = {"model": self.model, "messages": sent, "stream": self.stream}
         if temperature is not None:
             payload["temperature"] = temperature
         if max_tokens is not None:
@@ -90,15 +97,19 @@ class OpenAICompatBackend:
         payload = self._payload(messages, tools, temperature, max_tokens)
         try:
             if self.stream:
-                return await self._chat_stream(payload)
-            resp = await self._client.post("/chat/completions", json=payload)
-            _raise_for_status(resp.status_code, resp.text)
-            return _from_completion(resp.json(), self.model)
+                result = await self._chat_stream(payload)
+            else:
+                resp = await self._client.post("/chat/completions", json=payload)
+                _raise_for_status(resp.status_code, resp.text)
+                result = _from_completion(resp.json(), self.model)
         except httpx.TransportError as exc:  # connect/read/write/pool timeouts, resets, protocol errors
             raise LLMRetryableError(f"{type(exc).__name__}: {exc}") from exc
+        self.reasoning.remember(messages, result)
+        return result
 
     async def _chat_stream(self, payload: dict[str, Any]) -> ChatResult:
         content: list[str] = []
+        reasoning: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
         usage = Usage()
         finish: str | None = None
@@ -122,6 +133,8 @@ class OpenAICompatBackend:
                     delta = choice.get("delta") or {}
                     if delta.get("content"):
                         content.append(delta["content"])
+                    if delta.get("reasoning_content"):
+                        reasoning.append(delta["reasoning_content"])
                     for tc in delta.get("tool_calls") or []:
                         slot = calls.setdefault(
                             int(tc.get("index", 0)), {"id": None, "name": "", "arguments": ""}
@@ -135,7 +148,7 @@ class OpenAICompatBackend:
             ToolCall(str(c["id"] or f"call_{i}"), c["name"], parse_arguments(c["arguments"]))
             for i, c in sorted(calls.items())
         ]
-        return _finalize("".join(content), native, usage, self.model, finish)
+        return _finalize("".join(content), native, usage, self.model, finish, "".join(reasoning) or None)
 
 
 def _raise_for_status(status: int, body: str) -> None:
@@ -162,14 +175,24 @@ def _from_completion(data: dict[str, Any], model: str) -> ChatResult:
     u = data.get("usage") or {}
     usage = Usage(int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
     return _finalize(
-        msg.get("content") or "", native, usage, str(data.get("model") or model), choice.get("finish_reason")
+        msg.get("content") or "",
+        native,
+        usage,
+        str(data.get("model") or model),
+        choice.get("finish_reason"),
+        msg.get("reasoning_content") or None,
     )
 
 
 def _finalize(
-    content: str, native: list[ToolCall], usage: Usage, model: str, finish: str | None
+    content: str,
+    native: list[ToolCall],
+    usage: Usage,
+    model: str,
+    finish: str | None,
+    reasoning: str | None = None,
 ) -> ChatResult:
     if native:
-        return ChatResult(strip_think(content), native, usage, model, finish)
+        return ChatResult(strip_think(content), native, usage, model, finish, reasoning)
     text, parsed = parse_tool_calls(content)
-    return ChatResult(text, parsed, usage, model, "tool_calls" if parsed else finish)
+    return ChatResult(text, parsed, usage, model, "tool_calls" if parsed else finish, reasoning)
