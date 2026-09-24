@@ -1,0 +1,23 @@
+# MCP gateway tool policy (Phase 3). Deny-first: a tool must be on the session allowlist.
+#
+# Risk classification is a verb heuristic over the tool name tokens (split on "_") and the
+# first word of its description. Priority: destructive > write > read. Names matching no
+# verb fall back to `unknown_default` (conservative: write => needs approval).
+verbs:
+  read: [get, list, search, find, view]
+  write: [create, update, add, set]
+  destructive: [delete, cancel, refund, transfer, remove]
+unknown_default: write
+
+# Which risk levels need a one-time approval token issued by the application layer.
+require_approval: [write, destructive]
+
+# Per-tool overrides. Key: "<tool>" (any scenario) or "<scenario>__<tool>".
+overrides: {}
+#  e_commerce_33__submit_order_from_active_cart: destructive
+#  get_or_create_active_cart: write
+
+# Token bucket per (session, tool).
+rate_limit:
+  capacity: 10
+  refill_per_s: 2.0
