@@ -17,6 +17,9 @@ from typing import Any
 from workbench.envs.catalog import build_catalog
 
 PASSED = re.compile(r"PASSED: (\S+)")
+# loguru forces colored output when CI + GITHUB_ACTIONS (etc.) are set
+# (.venv/.../loguru/_colorama.py:25-29), so strip ANSI escapes before matching.
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 FAILED = re.compile(r"FAILED: (\S+)\s*\n\s*(.*)")
 
 CATEGORIES: list[tuple[str, re.Pattern[str]]] = [
@@ -79,6 +82,7 @@ class ValidationReport:
 
 def parse_check_all(output: str, dataset_dir: Path) -> ValidationReport:
     catalog = {s.name: s.tools for s in build_catalog(dataset_dir)}
+    output = ANSI.sub("", output)
     started = PASSED.findall(output)
     failed = {m.group(1): m.group(2).strip() for m in FAILED.finditer(output)}
     cats = Counter(categorize(p) for p in failed.values())

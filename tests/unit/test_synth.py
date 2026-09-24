@@ -158,3 +158,13 @@ def test_validation_parsing(tmp_path: Path) -> None:
     assert "failure category" in rep.markdown()
     assert categorize("sqlalchemy.exc.ArgumentError") == "sqlalchemy_error"
     assert categorize("weird") == "other"
+
+
+def test_validation_parsing_strips_ansi_colors(tmp_path: Path) -> None:
+    # loguru colors its output on GitHub Actions; names must still match the catalog.
+    (tmp_path / "gen_envs.jsonl").write_text(
+        json.dumps({"scenario": "a", "full_code": "operation_id='x'"}) + "\n", encoding="utf-8"
+    )
+    log = "\x1b[1mPASSED: a\x1b[0m\n"
+    d = parse_check_all(log, tmp_path).as_dict()
+    assert d["environments_started"] == 1 and d["tools_total"] == 1
