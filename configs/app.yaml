@@ -25,11 +25,12 @@ llm:
   read_timeout_s: 60
   total_timeout_s: 180
   max_retries: 3
+  max_tokens: 8192               # includes thinking tokens on DeepSeek (ADR-018)
 agent:
   max_steps: 12
   repeat_call_threshold: 3
   no_change_threshold: 4
-  token_budget: 60000
+  token_budget: 240000         # a full max_steps run on a 39-tool official scenario fits (ADR-018)
   wall_clock_s: 300
 api:
   host: 127.0.0.1

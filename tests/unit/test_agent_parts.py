@@ -4,7 +4,7 @@ import pytest
 
 from workbench.agent.guards import budget_guard, call_key, no_change_guard, repeat_guard
 from workbench.agent.memory import MemoryRejectedError, MemoryService
-from workbench.agent.nodes.common import Plan, extract_json, tools_block
+from workbench.agent.nodes.common import Plan, act_system_prompt, extract_json, tools_block, tools_risk_table
 from workbench.agent.prompts import load_prompt
 from workbench.config import AgentSettings
 
@@ -55,6 +55,48 @@ def test_tools_block_uses_runtime_tools() -> None:
         ]
     )
     assert "sc__t" in block and "needs approval" in block
+
+
+TOOLS = [
+    {
+        "name": "sc__search",
+        "risk": "read",
+        "requires_approval": False,
+        "description": "Search the catalogue by keyword",
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}},
+    },
+    {
+        "name": "sc__add",
+        "risk": "write",
+        "requires_approval": True,
+        "description": "Add an item",
+        "input_schema": {"type": "object", "required": ["offer_id"]},
+    },
+]
+
+
+def test_act_system_prompt_lists_names_and_risk_only() -> None:
+    # ADR-018: full definitions travel once, as the native tools parameter
+    steps = [{"description": "find it", "tool": "sc__search", "changes_data": False}]
+    system = act_system_prompt("ACT PROMPT", steps, TOOLS)
+    assert system.startswith("ACT PROMPT") and '"description": "find it"' in system
+    assert "- sc__search [risk: read]" in system and "- sc__add [risk: write, needs approval]" in system
+    assert "Search the catalogue" not in system and "properties" not in system and "offer_id" not in system
+    assert tools_risk_table([]) == "(no tools available)"
+
+
+def test_act_prompt_version_bumped() -> None:
+    p = load_prompt("act")
+    assert p.version == 2 and "tools" in p.text
+
+
+def test_defaults_follow_the_measurements() -> None:
+    # ADR-018: measured on official e_commerce_33 (39 tools) in Phase 12 / 12.5
+    from workbench.config import AgentSettings, LLMSettings, Settings
+
+    assert AgentSettings().token_budget == 240_000 and LLMSettings().max_tokens == 8192
+    s = Settings()  # configs/app.yaml must agree with the code defaults
+    assert (s.agent.token_budget, s.llm.max_tokens) == (240_000, 8192)
 
 
 def test_memory_gate_ttl_view_delete(tmp_path: Path) -> None:

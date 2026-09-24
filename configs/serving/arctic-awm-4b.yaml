@@ -7,7 +7,11 @@
 # parser / chat template are still NOT set by default: we keep AWM README's minimal command
 #   vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000   (AWM README.md:210)
 # The workbench client parses `<tool_call>{...}</tool_call>` from message content (the format
-# AWM's own agent uses, awm/core/agent.py:130-167), so tool calling works without a parser.
+# AWM's own agent uses, awm/core/agent.py:130-167). That is enough for requests WITHOUT `tools`
+# (e.g. `awm agent`). The workbench agent's act requests carry native `tools`, and vLLM v0.19.0
+# rejects those unless --enable-auto-tool-choice and --tool-call-parser are set (tool_choice
+# defaults to "auto": chat_completion/protocol.py:640-643; check: serve/render/serving.py:197-215).
+# See docs/LIMITATIONS.md U1; not changed here because it cannot be verified without a GPU.
 # Values below were checked against vLLM v0.19.0 source (commit 2a69949, docs/RECON.md §10).
 model: Snowflake/Arctic-AWM-4B
 served_model_name: Snowflake/Arctic-AWM-4B

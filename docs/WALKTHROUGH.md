@@ -218,7 +218,7 @@ make demo-mock          # 打开 http://127.0.0.1:8080/ui/
 
 ### 5.1 真实 LLM：官方 `e_commerce_33` 任务 0（单次链路演示，不构成评测）
 
-在 3.1 的环境变量之外，再放宽两个上限（原因：39 个工具的定义在每次 act 调用中出现两次，约 26K token；DeepSeek 的思考 token 计入输出）：
+在 3.1 的环境变量之外，这次运行还放宽了两个上限（原因：39 个工具的定义当时在每次 act 调用中出现两次，约 26K token；DeepSeek 的思考 token 计入输出）。Phase 12.5 修复后（ADR-018）默认值已足够，不再需要这两个变量，见 5.3：
 
 ```bash
 export WORKBENCH_LLM__MAX_TOKENS=8192 WORKBENCH_AGENT__TOKEN_BUDGET=400000

@@ -55,6 +55,25 @@ def tools_block(tools: list[dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "(no tools available)"
 
 
+def tools_risk_table(tools: list[dict[str, Any]]) -> str:
+    """One line per tool: name and risk only. Definitions go through the native ``tools`` parameter."""
+    lines = [
+        f"- {t['name']} [risk: {t['risk']}{', needs approval' if t.get('requires_approval') else ''}]"
+        for t in tools
+    ]
+    return "\n".join(lines) if lines else "(no tools available)"
+
+
+def act_system_prompt(prompt_text: str, steps: list[dict[str, Any]], tools: list[dict[str, Any]]) -> str:
+    """System prompt of the act step (ADR-018): the act prompt, the plan and a name/risk table.
+
+    Full tool definitions (descriptions and argument schemas) are sent once, as the request's
+    native ``tools`` parameter (``act`` node -> ``llm_tools``), not repeated here.
+    """
+    plan = json.dumps(steps, ensure_ascii=False, indent=1)
+    return f"{prompt_text}\n\nPlan:\n{plan}\n\nTools (name and risk level):\n{tools_risk_table(tools)}"
+
+
 def llm_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {

@@ -249,3 +249,24 @@
   - 每个后端实例最多记 1024 条，按 LRU 淘汰，极长或大量并发的对话可能丢掉较早轮次；
   - 两个会话的非 system 历史完全相同时（例如同一请求、同一回答、还没有工具调用）共用一条记录；
   - 多个工具调用的轮次只按第一个调用 id 识别，因为 act 节点只保留第一个调用。
+
+## ADR-018 act 调用只经原生 `tools` 参数传工具定义；按实测重设预算默认值
+
+- **背景**：act 节点把完整的工具定义放了两遍：system prompt 里的 `tools_block`（每个工具的描述与参数 schema），以及请求的原生 `tools` 参数。Phase 12 在官方 `e_commerce_33`（39 个工具）上实测每次 act 调用约 26K token，默认 `agent.token_budget=60000` 会在第 3 次 act 之前终止，演示时只能用环境变量调高预算。
+- **可选方案**：
+  1. 只保留 system prompt 里的定义、不发原生 `tools`：会失去原生工具调用，DeepSeek 等服务端也不再能按 schema 生成调用；
+  2. 只经原生 `tools` 传定义，system prompt 只保留工具名与风险级别的简表（仓库主人在 Phase 12.5 指定）。
+- **决定**：方案 2。
+  - `agent/nodes/common.py` 的 `act_system_prompt` 组合 act 提示词、计划和 `tools_risk_table`（每个工具一行：名称、风险级别、是否需要审批）；描述与 schema 只出现在原生 `tools` 参数中。plan 请求不带 `tools` 参数，仍用 `tools_block` 提供完整定义，未改。
+  - act 提示词升到 v2，加一句"描述与参数 schema 随请求的 tools 提供，下表只列名称与风险级别"，记入 CHANGELOG。
+- **测量**（离线，不调用 API，`docs/verification/logs/2026-09-24-phase12.5-act-tokens.log`）：
+  - 分词器与编码：`deepseek-ai/DeepSeek-V4.1-Flash` @ `dba1be0` 的 `tokenizer.json` 与官方编码脚本 `encoding/encoding.py`（MIT）。用它重算 Phase 12 四个探针的请求，与 DeepSeek 实际计费的 `prompt_tokens`（286、13248、309、40）逐一相同，差值为 0。
+  - 同一次 act 调用（官方 `e_commerce_33` 任务 0，Phase 12 的计划，思考模式）：修复前 25640 token，修复后 14358 token，每次少 11282 token；其中原生 `tools` 本身 13231 token。
+  - 按 Phase 12 的轨迹推算，同一次运行的总量从 121954 token 降到约 76826 token。
+- **新的默认值**（代码与 `configs/app.yaml` 同步）：
+  - `agent.token_budget`：60000 → **240000**。依据：39 个工具的官方场景（数据集平均每个场景约 35 个工具）上跑满 `max_steps`=12 次 act 仍在预算内，也就是先触发步数上限而不是预算：plan 12627 + Σ_{k=0..11}(14482 + 659k) + verify 1804 = 231709，向上取整。其中 14482 是修复后的第一次 act（Phase 12 实测 25764 减去 11282），659 是 Phase 12 中相邻 act 调用 token 数的平均增长。预算仍然是成本保护：工具更多或工具结果更长时会先触发它。
+  - `llm.max_tokens`：2048 → **8192**。依据：Phase 12 思考模式下每次调用的输出（含思考 token，按"计费总量 − 离线 prompt"得到的上界）为 plan 376、act 124/178/784/960、verify 250，最大 960；取其 8 倍向上到 2 的幂。思考长度随任务难度变化，DeepSeek 在思考模式下的默认上限是 64K；该上限只在模型真的输出那么多时才计费。
+- **代价**：
+  - 模型在 system prompt 里看不到工具描述，只能从原生 `tools` 读取，因此服务端必须把 `tools` 渲染进提示词。DeepSeek 会这样做（见上面的离线编码）。对 vLLM v0.19.0 读源码发现：请求带 `tools` 却没有 `tool_choice` 时默认为 `"auto"`（`vllm/entrypoints/openai/chat_completion/protocol.py:640-643`），服务端未配置 tool parser 时直接返回错误 `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`（`vllm/entrypoints/serve/render/serving.py:197-215`）；配置之后 `tools` 才会交给 chat template 渲染（同文件 `:223-247`）。act 请求一直带原生 `tools`（修复前也是），所以按当前的 serving profile（未设 parser）vLLM 后端本来就会在第一次 act 调用时失败，与本 ADR 无关；记入 LIMITATIONS U1，未在 GPU 上验证；
+  - 预算默认值只按一个参考场景与一次运行测得，不代表所有场景；
+  - plan 请求仍带完整定义（约 12K token），未在本 ADR 范围内。

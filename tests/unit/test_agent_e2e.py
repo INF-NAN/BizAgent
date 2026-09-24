@@ -139,3 +139,41 @@ async def test_trace_persisted(tmp_path: Path) -> None:
     trace = deps.hub.events("s1")
     assert (tmp_path / "runs" / "s1" / "trace.jsonl").exists()
     assert {"node", "llm", "tool_call", "final"} <= {e["type"] for e in trace}
+
+
+async def test_act_request_carries_tool_definitions_once(tmp_path: Path) -> None:
+    # ADR-018: the act system prompt holds names and risk only; schemas go in the tools parameter
+    from typing import Any
+
+    from tests.unit.agent_harness import FIX
+    from workbench.llm.backends.mock_replay import MockReplayBackend
+    from workbench.llm.types import ChatResult, Message
+
+    class Recording(MockReplayBackend):
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self.tool_params: list[list[dict[str, Any]] | None] = []
+
+        async def chat(
+            self,
+            messages: list[Message],
+            tools: list[dict[str, Any]] | None = None,
+            *,
+            temperature: float | None = None,
+            max_tokens: int | None = None,
+        ) -> ChatResult:
+            self.tool_params.append(tools)
+            return await super().chat(messages, tools, temperature=temperature, max_tokens=max_tokens)
+
+    runner, _, deps = await make_runner(tmp_path, "e2e_normal.jsonl")
+    backend = Recording(FIX / "e2e_normal.jsonl")
+    deps.llm.backend = backend
+    await collect(runner.run("t9", "s1", "Which headphones are rated best?"))
+    act_calls = [i for i, tools in enumerate(backend.tool_params) if tools]
+    assert act_calls, "no act call recorded"
+    system = backend.requests[act_calls[0]][0]["content"]
+    tools = backend.tool_params[act_calls[0]]
+    assert tools is not None
+    assert "arguments schema" not in system and "properties" not in system
+    assert "mini_e_commerce__search_products [risk: read]" in system
+    assert all("input_schema" in t for t in tools)

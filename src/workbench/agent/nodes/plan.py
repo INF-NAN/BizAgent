@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from pydantic import ValidationError
 
 from workbench.agent.deps import AgentDeps
 from workbench.agent.guards import budget_guard
-from workbench.agent.nodes.common import Plan, extract_json, memory_context, terminate, tools_block
+from workbench.agent.nodes.common import (
+    Plan,
+    act_system_prompt,
+    extract_json,
+    memory_context,
+    terminate,
+    tools_block,
+)
 from workbench.agent.nodes.intake import Node
 from workbench.agent.prompts import load_prompt
 from workbench.agent.state import AgentState
@@ -71,10 +77,7 @@ def make_plan(deps: AgentDeps) -> Node:
         deps.hub.emit(sid, "node", node="plan", steps=steps)
         act = load_prompt("act")
         history = [m for m in state.get("messages", []) if m.get("role") != "system"]
-        system = (
-            f"{act.text}\n\nPlan:\n{json.dumps(steps, ensure_ascii=False, indent=1)}"
-            f"\n\nAvailable tools:\n{tools_block(state['tools'])}"
-        )
+        system = act_system_prompt(act.text, steps, state["tools"])
         messages = [{"role": "system", "content": system}, *(history or [{"role": "user", "content": user}])]
         if rejection and history:
             messages.append(

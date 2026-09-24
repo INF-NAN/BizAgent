@@ -80,7 +80,8 @@ class LLMSettings(BaseModel):
     backoff_max_s: float = 8.0
     stream: bool = True
     temperature: float = 0.6
-    max_tokens: int = 2048
+    # Includes thinking tokens on DeepSeek; ~8.5x the largest completion measured in Phase 12 (ADR-018).
+    max_tokens: int = 8192
     mock_fixture: Path = Path("tests/fixtures/trajectories/e_commerce_33_basic.jsonl")
     # Demo only: rewind the mock script for every new session so the demo can be repeated.
     mock_reset_per_session: bool = False
@@ -90,7 +91,8 @@ class AgentSettings(BaseModel):
     max_steps: int = 12
     repeat_call_threshold: int = 3
     no_change_threshold: int = 4
-    token_budget: int = 60_000
+    # A full max_steps run on a 39-tool official scenario fits (measured, ADR-018).
+    token_budget: int = 240_000
     wall_clock_s: float = 300.0
     plan_retries: int = 2
     checkpoint_db: Path = Path("data/agent/checkpoints.sqlite")
