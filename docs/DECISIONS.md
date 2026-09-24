@@ -343,3 +343,31 @@
   - 以上都是读源码得到的结论，没有在真实服务上运行过。
   - 没有设置 reasoning parser，思考内容（`<think>…</think>`）留在 `content` 中，由 workbench 客户端去掉。如果模型在思考内容里写出了 `<tool_call>` 标签，parser 会把它当成工具调用；`qwen3` reasoning parser 可以把思考内容分出去，但不在 D11 的范围内，也未验证。
   - `docker-compose.yml` 的 `vllm` 服务命令是写死的（第 54 行），不读 profile，仍然没有这两个参数。按 D11 只改 profile 与 serve 脚本，未改 compose；compose 中的 vLLM 服务需要同样的处理才能服务 act 请求（LIMITATIONS U1）。
+
+## ADR-021 合成流水线可以从 `gen task` 开始（`--scenario-file`）
+
+- **背景**：
+  - Phase 13 要真实执行合成流水线，但 `gen scenario` 必须有 embedding 端点：`awm/core/scenario.py:63` 断言 `EMBEDDING_OPENAI_API_KEY` 存在，随后用它建 embedding 客户端（`:83-86`）。
+  - 本轮唯一的 LLM 服务 DeepSeek 没有 embedding 接口（2026-09-24 查阅）：
+    - API 文档站点地图中的 9 个 API 页面都与 embeddings 无关；
+    - `GET /models` 只返回 `deepseek-flash` 与 `deepseek-v4-pro`。
+  - TASK_v2 Phase 13 第 1 步与仓库主人的决定 D5 要求：跳过场景生成，手写 1 条企业类场景（名称加 `local_` 前缀，格式与官方 `gen_scenario.jsonl` 一致），从 `gen task` 开始；先读源码确认 `awm gen task --input` 能直接以场景文件为输入，不支持就停下。
+- **源码确认**：上游 CLI 支持这样做。
+  - `awm gen task` 的 `input` 字段注释就是 "scenario description file"（`awm/core/task.py:13`），CLI 帮助中它是必填项。
+  - `run` 直接加载这个文件（`:126-129`），每条只读取 `name` 与 `description`（`:44-45`）。
+  - 官方 `gen_scenario.jsonl` 的 1000 条恰好都只有这两个字符串字段。
+- **可选方案**：
+  1. 手工写 `state.json`，把 `scenario` 步骤标成已完成。这等于绕过编排层，而任务书禁止"自己绕过"；manifest 也不会记录场景来源。
+  2. 给 `workbench synth run` 加 `--scenario-file`：从计划中去掉 `gen scenario`，把文件复制为运行目录中的 `gen_scenario.jsonl`，作为 `gen task` 的输入。
+- **决定**：采用方案 2，由 `src/workbench/synth/runner.py` 与 `cli.py` 实现。
+  - **校验**：
+    - 每行必须恰好是 `{"name": str, "description": str}`，与官方格式一致；
+    - 名称必须是 AWM 规范化后的形式（`awm/tools.py:335-339`），并以 `local_` 开头（`local_[a-z0-9_]+`），这样不会与官方场景重名（ADR-011）；
+    - `--scenarios` 不能超过文件中的条数。
+  - **不覆盖已有输入**：运行目录中已有内容不同的 `gen_scenario.jsonl` 时报错；内容相同则继续，以便续跑。
+  - **所需环境变量**：只有 `gen scenario` 需要 embedding key，所以这种模式下 `--execute` 只要求 `OPENAI_API_KEY` 与 `AWM_SYN_OVERRIDE_MODEL`。
+  - **记录来源**：manifest 记录 `skipped_steps: ["scenario"]`，以及场景文件的路径与 sha256。
+  - **默认行为不变**：不传该参数时仍从 `gen scenario` 开始，仍要求 embedding key。
+- **代价**：
+  - 手写场景代替了 `gen scenario` 的生成与去重，这一步没有执行，也没有得到验证（U9 中 `gen scenario` 的部分仍未验证）。
+  - `local_` 前缀是本仓库的约定，不是 AWM 的要求。

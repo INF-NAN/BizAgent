@@ -398,6 +398,11 @@ def synth_run(
     num_tasks: int = typer.Option(10, "--num-tasks"),
     verifier_mode: str = typer.Option("sql", "--verifier-mode"),
     execute: bool = typer.Option(False, "--execute", help="actually call the LLM API (default: dry-run)"),
+    scenario_file: Path | None = typer.Option(
+        None,
+        "--scenario-file",
+        help="hand-written gen_scenario.jsonl (local_ names): start at `gen task`, skip `gen scenario`",
+    ),
 ) -> None:
     """Plan (default) or execute AWM's gen steps with checkpoints, LLM cache, ledger and validation."""
     import os
@@ -409,7 +414,12 @@ def synth_run(
     settings = get_settings()
     try:
         runner = SynthRunner(
-            settings, out, scenarios=scenarios, num_tasks=num_tasks, verifier_mode=verifier_mode
+            settings,
+            out,
+            scenarios=scenarios,
+            num_tasks=num_tasks,
+            verifier_mode=verifier_mode,
+            scenario_file=scenario_file,
         )
         if not execute:
             console.print_json(data=runner.describe())

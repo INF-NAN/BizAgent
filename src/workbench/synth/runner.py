@@ -11,12 +11,17 @@ verifier mode. Rules enforced here:
   results back into its input (awm/core/scenario.py:642), which would otherwise modify the
   submodule (rule R5).
 - Output must live under ``data/synth/`` and the manifest says ``origin: local-synth`` (R2).
+- ``--scenario-file`` starts at `gen task` with a hand-written scenario file instead of running
+  `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-021). `gen task`
+  reads only each line's ``name`` and ``description`` (awm/core/task.py:44-45, 126).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +39,9 @@ from workbench.synth.validate import ValidationReport, parse_check_all
 
 STEPS = ("scenario", "task", "db", "sample", "spec", "env", "verifier")
 REQUIRED_ENV = ("OPENAI_API_KEY", "AWM_SYN_OVERRIDE_MODEL", "EMBEDDING_OPENAI_API_KEY")
+# Hand-written scenarios: AWM's normalized form (awm/tools.py:335-339) with a local_ prefix, so they
+# never collide with an official AgentWorldModel-1K scenario name (ADR-011, ADR-021).
+LOCAL_SCENARIO_NAME = re.compile(r"local_[a-z0-9_]+")
 CommandRunner = Callable[[list[str], dict[str, str], Path], int]
 
 
@@ -66,8 +74,40 @@ def _awm(*args: str) -> list[str]:
     return [sys.executable, "-m", "awm.cli", *args]
 
 
+def load_scenario_file(path: Path) -> list[dict[str, str]]:
+    """Read a hand-written scenario file: official gen_scenario.jsonl format, local_ names only."""
+    if not path.is_file():
+        raise SynthError(f"scenario file not found: {path}")
+    rows: list[dict[str, str]] = []
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise SynthError(f"{path}:{n}: not JSON ({exc})") from exc
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"name", "description"}
+            or not all(isinstance(v, str) and v.strip() for v in row.values())
+        ):
+            expected = '{"name": str, "description": str} as in gen_scenario.jsonl'
+            raise SynthError(f"{path}:{n}: expected {expected}")
+        if not LOCAL_SCENARIO_NAME.fullmatch(row["name"]):
+            raise SynthError(f"{path}:{n}: name must match local_[a-z0-9_]+ (got {row['name']!r})")
+        rows.append(row)
+    if not rows:
+        raise SynthError(f"{path}: no scenarios")
+    return rows
+
+
 def plan_steps(
-    run_dir: Path, scenarios: int, num_tasks: int = 10, verifier_mode: str = "sql"
+    run_dir: Path,
+    scenarios: int,
+    num_tasks: int = 10,
+    verifier_mode: str = "sql",
+    *,
+    skip_scenario: bool = False,
 ) -> list[StepPlan]:
     r = run_dir.resolve()
     db_dir = str(r / "databases")
@@ -76,7 +116,7 @@ def plan_steps(
     def p(name: str) -> str:
         return str(r / name)
 
-    return [
+    steps = [
         StepPlan(
             "scenario",
             _awm(
@@ -184,6 +224,7 @@ def plan_steps(
             [verifier_out],
         ),
     ]
+    return [s for s in steps if not (skip_scenario and s.name == "scenario")]
 
 
 def default_command_runner(argv: list[str], env: dict[str, str], log_path: Path) -> int:
@@ -203,6 +244,7 @@ class SynthRunner:
         verifier_mode: str = "sql",
         command_runner: CommandRunner | None = None,
         environ: dict[str, str] | None = None,
+        scenario_file: Path | None = None,
     ) -> None:
         out_root = settings.synth.out_dir.resolve()
         resolved = run_dir.resolve()
@@ -212,12 +254,23 @@ class SynthRunner:
             raise SynthError("--scenarios must be >= 1")
         if verifier_mode not in ("sql", "code"):
             raise SynthError("--verifier-mode must be sql or code")
+        if scenario_file is not None:
+            rows = load_scenario_file(scenario_file)
+            if scenarios > len(rows):
+                raise SynthError(f"--scenarios {scenarios} but {scenario_file} has {len(rows)} scenario(s)")
         self.settings = settings
         self.run_dir = run_dir
         self.scenarios = scenarios
         self.num_tasks = num_tasks
         self.verifier_mode = verifier_mode
-        self.plan = plan_steps(run_dir, scenarios, num_tasks, verifier_mode)
+        self.scenario_file = scenario_file
+        self.plan = plan_steps(
+            run_dir, scenarios, num_tasks, verifier_mode, skip_scenario=scenario_file is not None
+        )
+        # only `gen scenario` needs the embedding key (awm/core/scenario.py:63)
+        self.required_env = tuple(
+            k for k in REQUIRED_ENV if scenario_file is None or k != "EMBEDDING_OPENAI_API_KEY"
+        )
         self._run = command_runner or default_command_runner
         self._environ = dict(os.environ if environ is None else environ)
         self.state_path = run_dir / "state.json"
@@ -230,10 +283,14 @@ class SynthRunner:
             "run_dir": str(self.run_dir),
             "mode": "dry-run",
             "origin": "local-synth",
-            "seed": str(self.settings.upstream.awm_dir / "outputs" / "seed_scenario.jsonl")
-            + " (copied into run dir)",
-            "required_env": list(REQUIRED_ENV),
-            "missing_env": [k for k in REQUIRED_ENV if not self._environ.get(k)],
+            "seed": (
+                f"{self.scenario_file} (hand-written; copied to gen_scenario.jsonl, gen scenario skipped)"
+                if self.scenario_file is not None
+                else str(self.settings.upstream.awm_dir / "outputs" / "seed_scenario.jsonl")
+                + " (copied into run dir)"
+            ),
+            "required_env": list(self.required_env),
+            "missing_env": [k for k in self.required_env if not self._environ.get(k)],
             "steps": [
                 {
                     "name": s.name,
@@ -249,9 +306,23 @@ class SynthRunner:
     # ------------------------------------------------------------------ execute
     def _prepare(self) -> None:
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        seed_dst = self.run_dir / "seed_scenario.jsonl"
-        if not seed_dst.exists():
-            shutil.copy2(self.settings.upstream.awm_dir / "outputs" / "seed_scenario.jsonl", seed_dst)
+        source: dict[str, Any] = {"skipped_steps": []}
+        if self.scenario_file is not None:
+            data = self.scenario_file.read_bytes()
+            dst = self.run_dir / "gen_scenario.jsonl"
+            if dst.exists() and dst.read_bytes() != data:
+                raise SynthError(f"{dst} exists and differs from {self.scenario_file}")
+            dst.write_bytes(data)
+            source = {
+                "skipped_steps": ["scenario"],
+                "scenario_file": str(self.scenario_file),
+                "scenario_file_sha256": hashlib.sha256(data).hexdigest(),
+                "scenario_note": "hand-written local_ scenarios; gen scenario skipped (no embedding API)",
+            }
+        else:
+            seed_dst = self.run_dir / "seed_scenario.jsonl"
+            if not seed_dst.exists():
+                shutil.copy2(self.settings.upstream.awm_dir / "outputs" / "seed_scenario.jsonl", seed_dst)
         manifest = {
             "origin": "local-synth",
             "official_data": False,
@@ -262,6 +333,7 @@ class SynthRunner:
             "scenarios": self.scenarios,
             "num_tasks": self.num_tasks,
             "verifier_mode": self.verifier_mode,
+            **source,
             "note": "locally synthesized; not part of AgentWorldModel-1K and never used for training here",
         }
         (self.run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -291,7 +363,7 @@ class SynthRunner:
         return env
 
     def execute(self, proxy_base: str | None = None, validate: bool = True) -> dict[str, Any]:
-        missing = [k for k in REQUIRED_ENV if not self._environ.get(k)]
+        missing = [k for k in self.required_env if not self._environ.get(k)]
         if missing:
             raise SynthError(f"--execute needs {', '.join(missing)} (see .env.example)")
         self._prepare()

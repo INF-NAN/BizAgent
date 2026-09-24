@@ -55,3 +55,18 @@ def test_gateway_export_risk_applies_the_method_floor(tmp_path) -> None:  # type
     )
     assert purge["requires_approval"] == "True" and rows["list_lists"]["risk"] == "read"
     assert "graded read: 1 by name alone, 0 with the HTTP-method floor" in " ".join(r.output.split())
+
+
+def test_synth_run_dry_run_with_scenario_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import json
+    from pathlib import Path
+
+    src = tmp_path / "s.jsonl"
+    src.write_text(json.dumps({"name": "local_it_service_desk", "description": "d"}) + "\n")
+    out = Path("data/synth/_dry_run_cli_test")
+    result = runner.invoke(
+        app, ["synth", "run", "--scenarios", "1", "--out", str(out), "--scenario-file", str(src)]
+    )
+    assert result.exit_code == 0, result.output
+    assert '"name": "task"' in result.output and '"name": "scenario"' not in result.output
+    assert "gen scenario skipped" in result.output and not out.exists()  # dry-run creates nothing

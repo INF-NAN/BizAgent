@@ -73,9 +73,13 @@ stopped wt1
 
 ```bash
 workbench synth run --scenarios 2 --out data/synth/demo           # 默认 dry-run，只打印计划
-# 真正执行需要 LLM key，并显式加 --execute（UNVERIFIED-LOCAL，未在本仓库执行过）
+# 没有 embedding 端点时跳过 gen scenario，从 gen task 开始（ADR-021）：
+workbench synth run --scenarios 1 --out data/synth/demo --scenario-file my_scenarios.jsonl
+# 真正执行需要 LLM key，并显式加 --execute
 workbench synth validate --help
 ```
+
+`--scenario-file` 的每一行必须与官方 `gen_scenario.jsonl` 格式一致（只有 `name` 与 `description`），名称以 `local_` 开头。
 
 预期 dry-run 输出（节选）：
 
