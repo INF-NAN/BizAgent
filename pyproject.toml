@@ -91,4 +91,5 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: starts real AWM MCP server subprocesses on CPU (no GPU, no network)",
+    "official_data: needs the official AgentWorldModel-1K dataset in data/awm1k (`make data`); skipped when absent",
 ]

@@ -15,6 +15,31 @@ os.environ.setdefault("PYTHONPYCACHEPREFIX", str(ROOT / ".cache" / "pycache"))
 
 MINI_DATASET = ROOT / "tests" / "fixtures" / "awm_mini"
 FIXTURES = ROOT / "tests" / "fixtures"
+OFFICIAL_DATASET = ROOT / "data" / "awm1k"
+OFFICIAL_FILES = (
+    "gen_scenario.jsonl",
+    "gen_tasks.jsonl",
+    "gen_db.jsonl",
+    "gen_sample.jsonl",
+    "gen_spec.jsonl",
+    "gen_envs.jsonl",
+    "gen_verifier.jsonl",
+    "gen_verifier.pure_code.jsonl",
+)
+
+
+def official_data_present() -> bool:
+    return all((OFFICIAL_DATASET / f).is_file() for f in OFFICIAL_FILES)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    # CI never downloads the official dataset: official_data tests skip there (TASK_v2 Phase 11).
+    if official_data_present():
+        return
+    skip = pytest.mark.skip(reason="official dataset not found in data/awm1k (run `make data`)")
+    for item in items:
+        if "official_data" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)
