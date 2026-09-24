@@ -9,4 +9,7 @@ tokens:
   "3.14": Python version (vLLM requires <3.14)
   "0.19": vLLM version (0.19.0)
   "1.26": MCP Python SDK version (1.26.0)
-files: {}
+files:
+  docs/verification/cost-ledger.md:
+    "0.02": DeepSeek off-peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)
+    "0.04": DeepSeek peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)
