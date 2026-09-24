@@ -1,0 +1,27 @@
+# Local hooks run inside the project's uv env, so they use exactly the pinned tool versions.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        exclude: ^(third_party/|tests/fixtures/)
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        exclude: ^(third_party/|tests/fixtures/)
+      - id: detect-secrets
+        name: detect-secrets (rule R7)
+        entry: uv run detect-secrets-hook --baseline .secrets.baseline
+        language: system
+        exclude: ^(third_party/|uv\.lock$|train/uv\.lock$)
+      - id: no-upstream-edits
+        name: forbid edits inside third_party submodules (rule R5)
+        entry: bash -c 'for d in third_party/agent-world-model third_party/AgentFly; do test -z "$(git -C $d status --porcelain)" || { echo "dirty submodule $d"; exit 1; }; done'
+        language: system
+        pass_filenames: false
+        always_run: true

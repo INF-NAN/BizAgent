@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/pycache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true   # top-level only; nested verl / mcp-adapted-bench stay uninitialized
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: setup
+        run: make setup
+      - name: lint
+        run: make lint
+      - name: secrets
+        run: uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files | grep -v -E '^(third_party/|uv\.lock$|train/uv\.lock$)')
+      - name: test (mock LLM, CPU only)
+        run: make test
+      - name: number guard
+        run: make check-numbers
+      - name: doctor
+        run: make doctor
