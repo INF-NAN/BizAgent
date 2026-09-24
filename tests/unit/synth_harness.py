@@ -86,12 +86,22 @@ def free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def fake_upstream(delay_s: float = 0.0, prompt_tokens: int = 1000, completion_tokens: int = 500) -> Starlette:
-    """Deterministic OpenAI-compatible chat endpoint; every call reports the given usage."""
+def fake_upstream(
+    delay_s: float = 0.0,
+    prompt_tokens: int = 1000,
+    completion_tokens: int = 500,
+    hold: dict[bytes, float] | None = None,
+) -> Starlette:
+    """Deterministic OpenAI-compatible chat endpoint; every call reports the given usage.
+
+    ``hold`` maps request bodies to a longer delay, applied the first time each one arrives: that
+    request stays in flight long enough for a test to interrupt the step while it waits.
+    """
+    held = dict(hold or {})
 
     async def chat(request: Request) -> JSONResponse:
         body = await request.body()
-        await asyncio.sleep(delay_s)
+        await asyncio.sleep(held.pop(body, delay_s))
         return JSONResponse(
             {
                 "model": json.loads(body)["model"],

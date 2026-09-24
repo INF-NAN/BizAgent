@@ -31,11 +31,16 @@ from workbench.synth.proxy import create_proxy_app
 from workbench.synth.runner import STEPS, ProxyThread
 
 REQUESTS = 3
+# The interrupted step's second request is held this long the first time it arrives, so the signal
+# lands while it waits however slowly the runner reacts. With only the normal upstream delay as the
+# window, CI once saw the step send its third request before the stop took effect.
+HOLD_S = 3.0
 
 
 @pytest.fixture
-def upstream() -> Iterator[str]:
-    with ProxyThread(fake_upstream(delay_s=0.3), "127.0.0.1", free_port()) as base:
+def upstream(step: str) -> Iterator[str]:
+    held = {request_body(MODEL, step, 1): HOLD_S}
+    with ProxyThread(fake_upstream(delay_s=0.05, hold=held), "127.0.0.1", free_port()) as base:
         yield base
 
 
@@ -85,7 +90,7 @@ def test_interrupt_mid_step_then_resume(tmp_path: Path, upstream: str, step: str
         def calls() -> int:
             return sum(r["step"] == step for r in ledger_rows(run_dir))
 
-        # interrupt after the step's first response, while its second request is in flight
+        # interrupt after the step's first response, while its second request is held upstream
         wait_for(lambda: calls() == 1 and server_pidfile.exists() and len(lines(run_dir / output)) == partial)
         driver.send_signal(signal.SIGTERM)  # the runner's own PID: nothing to guess about groups
         assert driver.wait(timeout=60) == 130
