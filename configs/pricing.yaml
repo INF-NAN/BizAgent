@@ -1,0 +1,8 @@
+# Price table for synthesis COST ESTIMATES only (workbench synth ledger).
+# Values are per 1M tokens in `currency`. They are placeholders — fill them in from your
+# provider's current price list. A model missing here is reported as "unpriced".
+currency: USD
+models: {}
+#  your-model-name:
+#    input_per_1m: 0.0
+#    output_per_1m: 0.0
