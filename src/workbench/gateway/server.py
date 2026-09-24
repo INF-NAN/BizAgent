@@ -91,6 +91,8 @@ class RegisterRequest(BaseModel):
     scenario: str
     url: str
     allowlist: list[str] | None = None
+    # tool -> HTTP method from the offline catalog (risk floor, ADR-015); omit if unknown
+    tool_methods: dict[str, str] = {}
 
 
 class ApprovalRequest(BaseModel):
@@ -112,7 +114,9 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
 
     async def register(request: Request) -> JSONResponse:
         req = RegisterRequest.model_validate(await request.json())
-        route = await gateway.register_session(req.session_id, req.scenario, req.url, req.allowlist)
+        route = await gateway.register_session(
+            req.session_id, req.scenario, req.url, req.allowlist, tool_methods=req.tool_methods
+        )
         return JSONResponse({"session_id": route.session_id, "tools": sorted(route.allowlist)})
 
     async def approve(request: Request) -> JSONResponse:

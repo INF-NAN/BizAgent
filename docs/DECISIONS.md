@@ -191,4 +191,25 @@
   - 影响：智能体没有按 `empty` 分支的硬编码流程；但 act 提示词把 `empty` 解释为"没有匹配结果"，模型可能误以为写操作没有生效而重试；审计日志与指标也会把成功的写操作记为 `empty`。"无状态变化"守卫使用数据库指纹，不受影响。
   - 决定：`empty` 只用于风险级别为 `read` 的工具；`write` / `destructive` 工具调用成功时一律为 `ok`（`normalize(..., read_only=...)`，由网关按分级传入）。
   - 剩余代价：名称里带读动词、实际会写入的工具（例如 `get_or_create_active_cart`）仍按 `read` 处理；可以通过 `configs/tool_policy.yaml` 的 `overrides` 纠正。
+  - 更正（Phase 12.5）：上句的例子不准确，`get_or_create_active_cart` 含动词 `create`，实际判为 `write`。真正受影响的例子见 ADR-015（例如 `DELETE purge_my_list_by_maturity_level`）；ADR-015 已用 HTTP 方法下限处理这类工具。
 
+## ADR-015 风险分级以路由的 HTTP 方法为下限（修订 ADR-006）
+
+- **背景**：
+  - ADR-006 的动词启发式只看工具名和描述的第一个词。2026-09-24 对官方数据集的静态扫描发现，18374 个 POST/PUT/PATCH/DELETE 工具中有 38 个按名称被判为 `read`：名词 `list`、`view` 被当成读动词（例如 `DELETE purge_my_list_by_maturity_level`、`POST record_answer_view`）；运行时描述首词 "Get" 还会把 `POST ensure_direct_dm_with_user` 判成 `read`。
+  - 被判为 `read` 的工具不需要审批（ADR-006），成功时还可能被标成 `empty`（ADR-014）。
+- **可选方案**：
+  1. 扩充动词表或加停用词：名词与动词同形（list、view），治标不治本；
+  2. 运行时读取环境服务的 `/openapi.json`：精确，但依赖运行中的服务；
+  3. 用离线目录（`gen_envs.jsonl` 的 `full_code`）中路由的 HTTP 方法作为风险下限。
+- **决定**：选方案 3（仓库主人在 Phase 12.5 指定）。
+  - `envs/catalog.route_methods` 用 `ast` 解析 `@<obj>.<method>(...)` 装饰器，不执行代码。工具名取 `operation_id`；没有 `operation_id` 时按 FastAPI 0.115.12 的 `generate_unique_id` 推导（`fastapi/utils.py:179-184`，OpenAPI 使用它：`fastapi/openapi/utils.py:237`），单测与 FastAPI 实际生成的 OpenAPI 逐项比对。fastapi-mcp 0.4.0 以 operationId 作为工具名（`fastapi_mcp/openapi/convert.py:50-63`）。同一 operationId 出现在多个路由上时，取风险最高的方法。
+  - 下限：DELETE → `destructive`；POST / PUT / PATCH → `write`；GET 和其它方法不设下限。`classify(..., http_method=...)` 先算启发式，再抬到下限；来源记为 `http_method`，理由里保留启发式原来的结论。
+  - 数据流：env-manager 启动会话时读取该场景的方法表（与 AWM 一样，同名场景取最后一条记录：`awm/core/server.py:98-99`），经 `EnvInfo` 交给网关注册会话；远程 env-manager（docker compose）的 HTTP 接口同样返回它。独立网关的 `POST /admin/sessions` 可选传 `tool_methods`。`export-risk` 离线导出时同样使用方法表，并新增 `http_method` 与 `heuristic_risk` 两列。官方数据与 local-synth 的 `gen_envs.jsonl` 都由 AWM 生成，同样适用。
+  - 目录里查不到的工具（场景不在数据目录中、代码无法解析、路径或 `operation_id` 不是字面量）沿用原来的启发式与保守默认值。
+  - `overrides` 是人工审核后的决定，按原样生效，即使低于下限（例如把以 POST 实现的纯查询设为 `read`）；导出表中的 `http_method` 列可以暴露这类覆盖。
+- **结果**（工程事实，由脚本统计，`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）：官方 35062 个工具中，POST/PUT/PATCH/DELETE 共 18374 个；其中被判为 `read` 的从修复前代码导出的 38 个降到 0 个。级别变化：37 个 `read` → `write`，1 个 `read` → `destructive`，55 个 `write` → `destructive`。新增 38 个需要审批的工具，没有工具因此不再需要审批。
+- **代价**：
+  - 以 POST 实现的纯查询（例如 `get_trip_price_quote`）现在需要审批，人工确认变多；需要时用 `overrides` 调低。
+  - 用 GET 实现的写操作仍然识别不了：方法与语义不一致时，下限帮不上忙。
+  - 每次启动会话要多读一次 `gen_envs.jsonl`；官方 104 MB 的文件上实测约 0.1 s（只对目标场景解码 JSON 并解析代码）。

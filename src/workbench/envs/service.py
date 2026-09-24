@@ -24,10 +24,13 @@ class EnvInfo:
     port: int
     tools: list[str] = field(default_factory=list)
     error: str | None = None
+    tool_methods: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_handle(cls, h: EnvHandle) -> EnvInfo:
-        return cls(h.session_id, h.scenario, h.url, h.state, h.port, list(h.tools), h.error)
+        return cls(
+            h.session_id, h.scenario, h.url, h.state, h.port, list(h.tools), h.error, dict(h.tool_methods)
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

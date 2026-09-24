@@ -222,3 +222,37 @@ async def test_client_disconnect_cancels_turn(tmp_path: Path) -> None:
         await asyncio.wait_for(backend.cancelled.wait(), 5)  # ...and the in-flight LLM call was cancelled
         assert sid not in app.state.api.busy
         assert "cancelled" in {e["type"] for e in rt.hub.events(sid)}
+
+
+async def test_runtime_passes_route_methods_to_the_gateway(tmp_path: Path) -> None:
+    class MethodsEnv(FakeEnvService):
+        async def start(self, scenario: str, session_id: str | None = None) -> EnvInfo:
+            info = await super().start(scenario, session_id)
+            return EnvInfo(
+                info.session_id,
+                scenario,
+                info.url,
+                "healthy",
+                0,
+                [],
+                tool_methods={"list_cart_items": "DELETE"},
+            )
+
+    settings = make_settings(tmp_path)
+    gateway = Gateway(
+        settings.gateway,
+        policy=PolicyConfig.load(Path("configs/tool_policy.yaml")),
+        approvals=ApprovalService(secret=b"k"),
+        upstream=MiniUpstream(),
+    )
+    rt = Runtime(
+        settings,
+        env_service=MethodsEnv(),
+        gateway=gateway,
+        llm=LLMClient(MockReplayBackend(FIX / "demo_query_write_approve.jsonl"), settings.llm),
+    )
+    s = await rt.create_session("mini_e_commerce")
+    tools = {t["name"].split("__")[1]: t for t in s.tools}
+    assert tools["list_cart_items"]["risk"] == "destructive" and tools["list_cart_items"]["requires_approval"]
+    assert tools["search_products"]["risk"] == "read" and tools["search_products"]["http_method"] is None
+    await rt.aclose()

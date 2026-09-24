@@ -58,7 +58,7 @@ def _level(value: Any) -> RiskLevel:
 class Classification:
     tool: str
     level: RiskLevel
-    source: Literal["override", "heuristic", "default"]
+    source: Literal["override", "heuristic", "default", "http_method"]
     reason: str
 
 
@@ -70,18 +70,47 @@ def _tokens(name: str, description: str) -> list[str]:
     return tokens
 
 
-def classify(
-    tool: str, description: str, config: PolicyConfig, scenario: str | None = None
-) -> Classification:
-    for key in ([f"{scenario}__{tool}"] if scenario else []) + [tool]:
-        if key in config.overrides:
-            return Classification(tool, config.overrides[key], "override", f"override {key}")
+# Minimum risk implied by the route's HTTP method (ADR-015). GET and unknown methods add nothing.
+METHOD_FLOOR: dict[str, RiskLevel] = {
+    "POST": "write",
+    "PUT": "write",
+    "PATCH": "write",
+    "DELETE": "destructive",
+}
+
+
+def _heuristic(tool: str, description: str, config: PolicyConfig) -> Classification:
     tokens = _tokens(tool, description)
     for level in ("destructive", "write", "read"):
         hits = [t for t in tokens if t in config.verbs.get(level, [])]
         if hits:
             return Classification(tool, _level(level), "heuristic", f"verb '{hits[0]}' => {level}")
     return Classification(tool, config.unknown_default, "default", "no known verb => unknown_default")
+
+
+def classify(
+    tool: str,
+    description: str,
+    config: PolicyConfig,
+    scenario: str | None = None,
+    http_method: str | None = None,
+) -> Classification:
+    """Override > (verb heuristic or unknown default, raised to the HTTP-method floor).
+
+    ``http_method`` comes from the offline catalog (``envs.catalog.route_methods``); ``None``
+    (tool not in the catalog) keeps the heuristic result unchanged. Overrides are reviewed
+    human decisions and are applied as written (ADR-015).
+    """
+    for key in ([f"{scenario}__{tool}"] if scenario else []) + [tool]:
+        if key in config.overrides:
+            return Classification(tool, config.overrides[key], "override", f"override {key}")
+    result = _heuristic(tool, description, config)
+    method = (http_method or "").upper()
+    floor = METHOD_FLOOR.get(method)
+    if floor is not None and LEVELS.index(floor) > LEVELS.index(result.level):
+        reason = f"{method} route => at least {floor} (was: {result.reason})"
+        return Classification(tool, floor, "http_method", reason)
+    return result
 
 
 # --------------------------------------------------------------------------- approvals

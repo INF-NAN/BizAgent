@@ -150,7 +150,7 @@ workbench doctor
 
 ## 4. 网关：策略、审批、审计
 
-目标：理解为什么所有工具调用都必须经过网关（ADR-005/006/007/009）。
+目标：理解为什么所有工具调用都必须经过网关（ADR-005/006/007/009/015）。
 
 ```bash
 workbench gateway export-risk --dataset-dir tests/fixtures/awm_mini --out data/risk_table.csv
@@ -159,20 +159,24 @@ workbench gateway export-risk --dataset-dir tests/fixtures/awm_mini --out data/r
 预期输出：
 
 ```
-wrote 7 rows to data/risk_table.csv (offline: names only; live sessions add descriptions)
+wrote 7 rows to data/risk_table.csv (offline: names and route methods; live sessions add descriptions)
+POST/PUT/PATCH/DELETE tools graded read: 0 by name alone, 0 with the HTTP-method floor
 
-scenario,tool,risk,source,reason,requires_approval
-mini_e_commerce,search_products,read,heuristic,verb 'search' => read,False
-mini_e_commerce,add_item_to_cart,write,heuristic,verb 'add' => write,True
-mini_e_commerce,remove_cart_item,destructive,heuristic,verb 'remove' => destructive,True
+scenario,tool,http_method,risk,source,reason,requires_approval,heuristic_risk
+mini_e_commerce,search_products,GET,read,heuristic,verb 'search' => read,False,read
+mini_e_commerce,add_item_to_cart,POST,write,heuristic,verb 'add' => write,True,write
+mini_e_commerce,remove_cart_item,DELETE,destructive,heuristic,verb 'remove' => destructive,True,destructive
 ...
 ```
+
+风险级别先按工具名动词判断，再以路由的 HTTP 方法为下限（DELETE 至少 `destructive`，POST/PUT/PATCH 至少 `write`，ADR-015）。迷你夹具的方法与名称一致，所以没有变化；在官方数据集上，POST/PUT/PATCH/DELETE 工具中被判为 `read` 的从 38 个降到 0 个（`docs/verification/logs/2026-09-24-phase12.5-risk-floor.log`）。
 
 `workbench gateway serve` 可以把网关作为独立的 MCP server 运行，任何 MCP 客户端都能连接。
 
 阅读：
 
 - `configs/tool_policy.yaml`：动词表、未知动词默认按 `write` 处理、需要审批的风险级别、限流参数；
+- `src/workbench/envs/catalog.py` 的 `route_methods`：用 `ast` 从场景代码中读出每个工具的 HTTP 方法（不执行代码）；
 - `src/workbench/gateway/policy.py`（deny-first 分级）、`gateway/core.py`（HMAC 一次性审批令牌，绑定会话、工具和参数摘要）、`gateway/ratelimit.py`、`gateway/audit.py`（PII 脱敏）、`gateway/errors.py`（ok / empty / error 归一，依据 AWM 的实际错误文本，见 RECON §10）；
 - `src/workbench/gateway/server.py`：低层 MCP Server，工具名为 `<scenario>__<tool>`；
 - 测试：`tests/unit/test_gateway_*.py`、`tests/integration/test_gateway_real_awm.py`。

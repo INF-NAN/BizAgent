@@ -139,3 +139,47 @@ def test_invalid_token_denied() -> None:
         session_id="s", tool="t", risk="write", allowlist=frozenset({"t"}), arguments={}, approval_token="x.y"
     )
     assert (d.allowed, d.code) == (False, "approval_invalid")
+
+
+@pytest.mark.parametrize(
+    ("tool", "method", "level", "source"),
+    [
+        # read verbs in write routes are raised to the method floor (ADR-015)
+        ("purge_my_list_by_maturity_level", "DELETE", "destructive", "http_method"),
+        ("attach_contact_list_to_collector", "POST", "write", "http_method"),
+        ("record_answer_view", "POST", "write", "http_method"),
+        ("get_trip_price_quote", "post", "write", "http_method"),  # case-insensitive
+        # unknown verb on a DELETE route: default write -> destructive
+        ("clear_cart", "DELETE", "destructive", "http_method"),
+        # already at or above the floor: heuristic result kept
+        ("update_user_address", "PUT", "write", "heuristic"),
+        ("add_item_to_cart", "PATCH", "write", "heuristic"),
+        ("delete_user_payment_method", "DELETE", "destructive", "heuristic"),
+        ("list_and_delete_items", "POST", "destructive", "heuristic"),
+        # GET, other methods and tools missing from the catalog add no floor
+        ("list_cart_items", "GET", "read", "heuristic"),
+        ("list_cart_items", "HEAD", "read", "heuristic"),
+        ("list_cart_items", None, "read", "heuristic"),
+        ("submit_order_from_active_cart", None, "write", "default"),
+    ],
+)
+def test_http_method_floor(tool: str, method: str | None, level: str, source: str) -> None:
+    c = classify(tool, "", CFG, http_method=method)
+    assert (c.level, c.source) == (level, source)
+
+
+def test_floor_reason_keeps_the_heuristic_verdict() -> None:
+    c = classify("purge_my_list_by_maturity_level", "", CFG, http_method="DELETE")
+    assert c.reason == "DELETE route => at least destructive (was: verb 'list' => read)"
+
+
+def test_description_verb_cannot_lower_a_write_route() -> None:
+    # "Get or create ..." made this POST route a read before the floor existed
+    c = classify("ensure_direct_dm_with_user", "Get or create 1:1 DM by tag", CFG, http_method="POST")
+    assert (c.level, c.source) == ("write", "http_method")
+
+
+def test_override_is_applied_as_written_even_below_the_floor() -> None:
+    cfg = PolicyConfig(verbs=CFG.verbs, overrides={"get_trip_price_quote": "read"})
+    c = classify("get_trip_price_quote", "", cfg, http_method="POST")
+    assert (c.level, c.source) == ("read", "override")

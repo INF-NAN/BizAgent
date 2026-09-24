@@ -220,28 +220,64 @@ def gateway_export_risk(
     dataset_dir: Path | None = typer.Option(None, "--dataset-dir"),
     out: Path = typer.Option(Path("data/risk_table.csv"), "--out"),
 ) -> None:
-    """Classify every tool of every scenario (offline, by tool name) into a CSV for human review."""
+    """Classify every tool of every scenario offline (name + route HTTP method) into a CSV for review.
+
+    ``heuristic_risk`` is the name-only result before the HTTP-method floor (ADR-015), so the CSV
+    also shows what the floor changed.
+    """
     import csv
 
-    from workbench.envs.catalog import build_catalog
-    from workbench.gateway.policy import PolicyConfig, classify
+    from workbench.envs.catalog import build_catalog, iter_route_methods
+    from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify
 
     settings = get_settings()
     policy = PolicyConfig.load(settings.gateway.policy_file)
     directory = dataset_dir or settings.env.dataset_dir
+    methods = dict(iter_route_methods(directory))
     out.parent.mkdir(parents=True, exist_ok=True)
-    rows = 0
+    rows = heuristic_read_writes = final_read_writes = 0
     with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["scenario", "tool", "risk", "source", "reason", "requires_approval"])
+        writer.writerow(
+            [
+                "scenario",
+                "tool",
+                "http_method",
+                "risk",
+                "source",
+                "reason",
+                "requires_approval",
+                "heuristic_risk",
+            ]
+        )
         for scenario in build_catalog(directory):
             for tool in scenario.tool_names:
-                c = classify(tool, "", policy, scenario.name)
+                method = methods.get(scenario.name, {}).get(tool)
+                c = classify(tool, "", policy, scenario.name, http_method=method)
+                heuristic = classify(tool, "", policy, scenario.name)
+                if method in METHOD_FLOOR:
+                    heuristic_read_writes += heuristic.level == "read"
+                    final_read_writes += c.level == "read"
                 writer.writerow(
-                    [scenario.name, tool, c.level, c.source, c.reason, c.level in policy.require_approval]
+                    [
+                        scenario.name,
+                        tool,
+                        method or "",
+                        c.level,
+                        c.source,
+                        c.reason,
+                        c.level in policy.require_approval,
+                        heuristic.level,
+                    ]
                 )
                 rows += 1
-    console.print(f"wrote {rows} rows to {out} (offline: names only; live sessions add descriptions)")
+    console.print(
+        f"wrote {rows} rows to {out} (offline: names and route methods; live sessions add descriptions)"
+    )
+    console.print(
+        f"POST/PUT/PATCH/DELETE tools graded read: {heuristic_read_writes} by name alone, "
+        f"{final_read_writes} with the HTTP-method floor"
+    )
 
 
 @serve_app.command("vllm-cmd")

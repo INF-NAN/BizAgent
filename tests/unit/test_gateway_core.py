@@ -139,3 +139,26 @@ async def test_empty_status_only_for_read_tools(gw: tuple[Gateway, FakeUpstream]
     token = g.issue_approval("s1", "mini__add_item_to_cart", {"product_id": 1}, approver="alice")
     out = await g.call_tool("s1", "mini__add_item_to_cart", {"product_id": 1}, approval_token=token)
     assert out.decision == "allowed" and out.status == "ok"
+
+
+async def test_http_method_floor_requires_approval(gw: tuple[Gateway, FakeUpstream]) -> None:
+    g, up = gw
+    # list_cart_items is a read by name; served by a DELETE route it must need approval (ADR-015)
+    await g.register_session(
+        "s1", "mini", "http://x/mcp", tool_methods={"list_cart_items": "DELETE", "search_products": "GET"}
+    )
+    assert g.requires_approval("s1", "mini__list_cart_items")
+    assert not g.requires_approval("s1", "mini__search_products")
+    tool = next(t for t in g.list_tools("s1") if t.tool == "list_cart_items")
+    assert (tool.risk, tool.classification.source, tool.http_method) == (
+        "destructive",
+        "http_method",
+        "DELETE",
+    )
+    assert tool.as_dict(True)["http_method"] == "DELETE"
+    out = await g.call_tool("s1", "mini__list_cart_items", {})
+    assert out.status == "denied" and up.calls == []
+    # no catalog information -> the name heuristic, as before
+    await g.register_session("s2", "mini", "http://x/mcp")
+    assert not g.requires_approval("s2", "mini__list_cart_items")
+    assert next(t for t in g.list_tools("s2") if t.tool == "list_cart_items").http_method is None

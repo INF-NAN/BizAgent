@@ -148,3 +148,28 @@ async def test_successful_write_with_empty_lists_is_not_empty(official: EnvManag
     assert risk != "read"
     assert normalize("patch_hidden_subreddits", False, text, read_only=risk == "read").status == "ok"
     assert official.diff("off3").tables["user_content_preferences"].changed == [1]
+
+
+def test_http_method_floor_on_official_routes() -> None:
+    # ADR-015: noun "list" made this DELETE route a read before; the route method now sets the floor
+    from workbench.envs.catalog import iter_route_methods, load_route_methods
+    from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify
+
+    policy = PolicyConfig.load(Path("configs/tool_policy.yaml"))
+    methods = load_route_methods(OFFICIAL_DATASET, "subscription_management_5")
+    assert methods["purge_my_list_by_maturity_level"] == "DELETE"
+    c = classify(
+        "purge_my_list_by_maturity_level",
+        "Purge My List by maturity",
+        policy,
+        "subscription_management_5",
+        "DELETE",
+    )
+    assert (c.level, c.source) == ("destructive", "http_method")
+    graded_read = [
+        (scenario, tool)
+        for scenario, routes in iter_route_methods(OFFICIAL_DATASET)
+        for tool, method in routes.items()
+        if method in METHOD_FLOOR and classify(tool, "", policy, scenario, http_method=method).level == "read"
+    ]
+    assert graded_read == []

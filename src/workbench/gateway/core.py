@@ -41,6 +41,7 @@ class GatewayTool:
     description: str
     input_schema: dict[str, Any]
     classification: Classification
+    http_method: str | None = None  # from the offline catalog; None if unknown
 
     @property
     def risk(self) -> str:
@@ -54,6 +55,7 @@ class GatewayTool:
             "risk": self.risk,
             "risk_source": self.classification.source,
             "risk_reason": self.classification.reason,
+            "http_method": self.http_method,
             "requires_approval": requires_approval,
         }
 
@@ -65,6 +67,7 @@ class SessionRoute:
     url: str
     allowlist: frozenset[str] = frozenset()
     tools: dict[str, GatewayTool] = field(default_factory=dict)
+    tool_methods: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -129,17 +132,24 @@ class Gateway:
 
     # ------------------------------------------------------------------ sessions
     async def register_session(
-        self, session_id: str, scenario: str, url: str, allowlist: list[str] | None = None
+        self,
+        session_id: str,
+        scenario: str,
+        url: str,
+        allowlist: list[str] | None = None,
+        tool_methods: dict[str, str] | None = None,
     ) -> SessionRoute:
         """Discover tools once; deny-first: only tools named at registration are callable.
 
         ``allowlist=None`` means "every tool discovered right now" (explicitly enumerated,
         so tools that appear later are still denied); ``[]`` allows nothing.
+        ``tool_methods`` (tool -> HTTP method, from the offline catalog) sets a risk floor;
+        tools missing from it keep the name heuristic (ADR-015).
         """
         specs = await self.upstream.list_tools(url, self.settings.upstream_timeout_s)
-        route = SessionRoute(session_id, scenario, url)
+        route = SessionRoute(session_id, scenario, url, tool_methods=dict(tool_methods or {}))
         for spec in specs:
-            route.tools[spec.name] = self._wrap(scenario, spec)
+            route.tools[spec.name] = self._wrap(scenario, spec, route.tool_methods.get(spec.name))
         names = set(route.tools)
         chosen = names if allowlist is None else {t for t in allowlist if t in names}
         route.allowlist = frozenset(chosen)
@@ -154,13 +164,16 @@ class Gateway:
             raise UnknownSessionError(session_id)
         return self._routes[session_id]
 
-    def _wrap(self, scenario: str, spec: ToolSpec) -> GatewayTool:
+    def _wrap(self, scenario: str, spec: ToolSpec, http_method: str | None = None) -> GatewayTool:
         return GatewayTool(
             name=f"{scenario}{SEP}{spec.name}",
             tool=spec.name,
             description=spec.description,
             input_schema=spec.input_schema,
-            classification=classify(spec.name, spec.description, self.policy_config, scenario),
+            classification=classify(
+                spec.name, spec.description, self.policy_config, scenario, http_method=http_method
+            ),
+            http_method=http_method,
         )
 
     def list_tools(self, session_id: str) -> list[GatewayTool]:

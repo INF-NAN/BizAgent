@@ -30,6 +30,7 @@ from typing import Any, Literal, Protocol
 from workbench.config import EnvSettings
 from workbench.envs import awm_adapter
 from workbench.envs import snapshot as snap
+from workbench.envs.catalog import load_route_methods
 from workbench.envs.health import HealthResult, check_mcp
 from workbench.envs.ports import PortPool
 
@@ -37,6 +38,7 @@ EnvState = Literal["starting", "healthy", "unhealthy", "stopped"]
 HealthFn = Callable[[str, float], Awaitable[HealthResult]]
 DbBuilder = Callable[[Path, str, Path], Path]
 CommandBuilder = Callable[..., list[str]]
+MethodsLoader = Callable[[Path, str], dict[str, str]]
 
 
 class EnvError(RuntimeError):
@@ -90,6 +92,8 @@ class EnvHandle:
     process: subprocess.Popen[bytes] | None = field(default=None, repr=False)
     error: str | None = None
     tools: list[str] = field(default_factory=list)
+    # tool -> HTTP method of its route, from the scenario's offline code (risk floor, ADR-015)
+    tool_methods: dict[str, str] = field(default_factory=dict)
 
     @property
     def pid(self) -> int | None:
@@ -142,6 +146,7 @@ class EnvManager:
         health_fn: HealthFn | None = None,
         db_builder: DbBuilder | None = None,
         command_builder: CommandBuilder | None = None,
+        methods_loader: MethodsLoader | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
@@ -150,6 +155,7 @@ class EnvManager:
         self._health = health_fn or check_mcp
         self._db_builder = db_builder or awm_adapter.build_session_db
         self._command = command_builder or awm_adapter.server_command
+        self._methods = methods_loader or load_route_methods
         self._clock = clock
         self._handles: dict[str, EnvHandle] = {}
         self._sem: asyncio.Semaphore | None = None
@@ -191,6 +197,7 @@ class EnvManager:
         run_dir = s.runs_dir / sid
         run_dir.mkdir(parents=True, exist_ok=True)
         built = await asyncio.to_thread(self._db_builder, s.dataset_dir, scenario, run_dir / "build")
+        tool_methods = await asyncio.to_thread(self._methods, s.dataset_dir, scenario)
         initial_db = awm_adapter.copy_db(built, run_dir / "initial.db")
         work_db = awm_adapter.copy_db(built, run_dir / "work.db")
         port = self.ports.allocate()
@@ -220,6 +227,7 @@ class EnvManager:
             state="starting",
             started_at=now,
             last_used=now,
+            tool_methods=tool_methods,
         )
         try:
             handle.process = self._launcher.launch(cmd, log_path, env)

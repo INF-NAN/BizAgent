@@ -51,3 +51,33 @@ def test_cli_env_search_on_mini_dataset() -> None:
     assert "mini_e_commerce" in r.output
     miss = CliRunner().invoke(cli_app, ["env", "search", "zzz", "--dataset-dir", "tests/fixtures/awm_mini"])
     assert miss.exit_code == 1
+
+
+async def test_route_methods_travel_with_the_session(tmp_path: Path) -> None:
+    from tests.unit.test_env_manager import cmd_for, fake_db, ok_health
+    from workbench.envs.manager import EnvManager
+
+    seen: list[tuple[Path, str]] = []
+
+    def loader(dataset_dir: Path, scenario: str) -> dict[str, str]:
+        seen.append((dataset_dir, scenario))
+        return {"t1": "DELETE"}
+
+    base = make(tmp_path, SLEEPER).settings
+    mgr = EnvManager(
+        base,
+        health_fn=ok_health,
+        db_builder=fake_db,
+        command_builder=cmd_for(SLEEPER),
+        methods_loader=loader,
+    )
+    local = LocalEnvService(mgr)
+    assert (await local.start("scn", "m1")).tool_methods == {"t1": "DELETE"}
+    assert seen == [(base.dataset_dir, "scn")]
+    # the remote control plane (docker compose) carries the same map
+    app = create_env_app(mgr.settings, manager=mgr)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://env")
+    remote = RemoteEnvService("http://env", client=client)
+    assert (await remote.info("m1")).tool_methods == {"t1": "DELETE"}
+    await remote.close()
+    await mgr.stop_all()

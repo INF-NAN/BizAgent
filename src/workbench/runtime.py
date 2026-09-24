@@ -78,7 +78,9 @@ class Runtime:
         sid = session_id or uuid.uuid4().hex[:12]
         env = await self.envs.start(scenario, sid)
         try:
-            await self.gateway.register_session(sid, env.scenario, env.url, allowlist)
+            await self.gateway.register_session(
+                sid, env.scenario, env.url, allowlist, tool_methods=env.tool_methods
+            )
         except BaseException:
             await self.envs.stop(sid)
             raise
