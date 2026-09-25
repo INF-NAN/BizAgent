@@ -53,7 +53,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
 | `docs/RECON.md` | 上游侦察报告，记录全部"文件:行号" |
 | `docs/UPSTREAM.md` | 本文件 |
-| `docs/DECISIONS.md` | ADR-001 至 ADR-029 |
+| `docs/DECISIONS.md` | ADR-001 至 ADR-030 |
 | `docs/ARCHITECTURE.md` | 分层图与审批写操作时序图 |
 | `docs/WALKTHROUGH.md` | 学习路线 |
 | `docs/LIMITATIONS.md` | 未验证项与已知限制 |
@@ -73,6 +73,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm）。镜像内含 AWM 代码，只用于本地和 CI 构建，不得推送到任何镜像仓库（§3.1、ADR-003） |
 | `configs/app.yaml` | 应用默认配置 |
 | `configs/tool_policy.yaml` | 网关风险分级、审批、限流策略 |
+| `configs/approval_policy.yaml` | 审批策略：按顺序匹配的 auto_approve / require_human / deny 规则（ADR-030） |
 | `configs/serving/arctic-awm-4b.yaml` | vLLM 服务 profile |
 | `configs/pricing.yaml` | 合成账本的价格表（DeepSeek 官方价格页，上界口径） |
 | `configs/number_whitelist.yaml` | 数字守卫白名单；`skip_files` 只豁免三份任务书原文（ADR-028、D28） |
@@ -88,9 +89,9 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019）与训练环境白名单（ADR-026） |
 | `src/workbench/verify.py` | `workbench verify`：不给 key 地运行 `awm verify`，sql 模式的裁判经本地代理（ADR-025） |
 | `src/workbench/envs/*.py` | 环境管理：端口、快照与 diff、行级改动与结构比对（`changes.py`）、健康检查、场景目录、AWM 适配、进程组管理、审批前预演的影子环境（ADR-029）、env-manager 服务 |
-| `src/workbench/gateway/*.py` | MCP 网关：策略、限流、审计、错误归一、上游连接、核心（含预演记录、令牌与预演绑定、执行后比对，ADR-029）、server |
+| `src/workbench/gateway/*.py` | MCP 网关：策略、审批策略（`approval_policy.py`，ADR-030）、限流、审计、错误归一、上游连接、核心（含预演记录、令牌与预演绑定、执行后比对，ADR-029）、server |
 | `src/workbench/llm/**` | LLM 客户端：类型、错误、`<tool_call>` 解析、mock replay 与 OpenAI 兼容后端、vLLM 命令生成；`workbench serve probe` 的两个探针（U1） |
-| `src/workbench/agent/**` | LangGraph 智能体：状态、守卫、记忆、prompt（版本化）、节点（含审批前的 preview 节点）、图、runner |
+| `src/workbench/agent/**` | LangGraph 智能体：状态、守卫、记忆、prompt（版本化）、节点（act 按审批策略分流，审批前的 preview 节点）、图、runner |
 | `src/workbench/api/*.py` | HTTP API、SSE、schema |
 | `src/workbench/obs/*.py` | trace（JSONL）与 Prometheus 指标 |
 | `src/workbench/synth/*.py` | 合成编排：步骤计划、checkpoint、LLM 代理（缓存、重试、账本、预算熔断）、中断回收、校验报告 |

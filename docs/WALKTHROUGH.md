@@ -297,6 +297,64 @@ uv run python scripts/measure_preview.py --dataset-dir data/awm1k --scenario e_c
 - 单元：`tests/unit/test_changes.py`、`tests/unit/test_gateway_preview.py`；
 - 集成：`tests/integration/test_preview_real_awm.py`（真实 AWM server：预演与真实 diff 一致、destructive、失败路径、回收后无残留）。
 
+### 4.2 审批策略（Phase 18，ADR-030）
+
+`configs/approval_policy.yaml` 中的规则按顺序匹配，第一条命中的规则决定这次调用是 `auto_approve`、`require_human` 还是 `deny`。没有命中时，write 与 destructive 需要人工审批，read 不需要。destructive 调用永远不会被自动批准，这一点由代码保证：加载时拒绝这样的规则，匹配时跳过，网关签发令牌前再查一次。
+
+规则可以按工具名与场景名（glob）、风险级别、参数条件匹配。参数条件包括数值比较（`lt`/`lte`/`gt`/`gte`/`eq`/`ne`）和枚举成员（`in`/`not_in`）。字段说明写在文件开头的注释里；文件在网关启动时校验，出现未知字段就报错并停止。
+
+先离线试一次调用，不运行任何东西：
+
+```bash
+uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
+  --scenario mini_e_commerce --tool add_item_to_cart --args '{"product_offer_id": 11, "quantity": 1}'
+# decision: require_human (default) - no rule matched: write calls need a human by default
+uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
+  --tool mini_e_commerce__delete_user_payment_method --args '{"payment_method_id": 2}'
+# decision: deny (rule no-payment-method-deletion) - ...
+```
+
+输出会逐条列出每条规则是否命中、原因，以及 destructive 保护是否生效。
+
+三种决策在运行时的表现：
+
+- `require_human`：和 Phase 17 一样，先预演，再由人在审批卡片上批准。卡片上的"审批策略"一行写明是哪条规则，没有命中时显示 default。
+- `auto_approve`（仓库主人的决定 D32）：
+  - 不预演，也不弹出审批卡片；
+  - 网关自己签发令牌，批准人为 `policy:<规则编号>`，令牌绑定 `preview_unavailable`；
+  - 执行后照常测量实际改动，与规则编号一起写入审计；
+  - 时间线显示"auto-approved by the approval policy"和实际改动。
+- `deny`：网关拒绝（`denied_by_rule`），带着令牌也拒绝，也不能再申请审批。
+
+用临时策略文件在演示中看自动批准（不改仓库里的文件）：
+
+```bash
+cat > /tmp/demo-policy.yaml <<'YAML'
+version: 1
+rules:
+  - id: demo-small-add
+    tools: [add_item_to_cart]
+    risk: [write]
+    args: {quantity: {lte: 2}}
+    decision: auto_approve
+YAML
+WORKBENCH_APPROVAL__POLICY_FILE=/tmp/demo-policy.yaml make demo-mock
+tail -n 1 data/demo/audit.jsonl | python3 -m json.tool   # policy.rule、approver、preview_check.actual
+```
+
+每条审计的 `policy` 字段记录 decision、rule（没有命中规则时为 null）、reason 与 guard。
+
+阅读：
+
+- `src/workbench/gateway/approval_policy.py`（schema、匹配、从严规则、destructive 保护）；
+- `src/workbench/gateway/core.py` 的 `approval_verdict` 与 `_call`；
+- `src/workbench/agent/nodes/act.py`（按决策分流）。
+
+测试：
+
+- 单元：`tests/unit/test_approval_policy.py`、`tests/unit/test_gateway_approval_policy.py`、`tests/unit/test_agent_approval_policy.py`；
+- CLI：`tests/unit/test_cli.py` 中以 `test_gateway_policy_test_` 开头的三个测试。
+
 ## 5. 智能体：LangGraph 状态机与 UI
 
 目标：跑通"查询 → 审批 → 写入 → 回答 → DB diff"的完整链路。

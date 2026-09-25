@@ -19,7 +19,7 @@ flowchart TB
     VLLM["vLLM / OpenAI 兼容端点<br/>（GPU：UNVERIFIED-LOCAL）"]
   end
   subgraph GW["网关层"]
-    GATE["gateway/core.py + server.py<br/>MCP server：路由 · deny-first 策略 · 预演记录 · 一次性审批令牌 · 执行后比对 · 限流 · 审计 · 空/错归一"]
+    GATE["gateway/core.py + server.py<br/>MCP server：路由 · deny-first 策略 · 审批策略（approval_policy.yaml） · 预演记录 · 一次性审批令牌 · 执行后比对 · 限流 · 审计 · 空/错归一"]
   end
   subgraph ENV["环境层"]
     MGR["envs/manager.py + service.py<br/>env-manager：每会话独立 DB · 进程组 · 环境变量白名单 · 快照/diff · 审批前预演 · 回收"]
@@ -84,8 +84,8 @@ sequenceDiagram
   GW-->>G: status=ok（审计一条）
   G->>L: act
   L-->>G: tool_call add_item_to_cart
-  G->>GW: requires_approval?（风险 = write）
-  GW-->>G: 需要审批
+  G->>GW: approval_verdict（审批策略：规则按顺序匹配，ADR-030）
+  GW-->>G: require_human（没有命中规则：write 默认需要人工审批）
   G->>GW: preview（preview 节点，ADR-029）
   GW->>M: preview(sid, add_item_to_cart, 参数, 超时)
   M->>M: 在线备份会话当前的 work.db → 影子副本
@@ -121,6 +121,7 @@ sequenceDiagram
 要点：
 
 - 被中断的 `approve` 节点在恢复时会重新执行，所以令牌在恢复后才签发（`agent/nodes/approve.py`）；预演也因此放在单独的 `preview` 节点，结果存进 checkpoint，只执行一次。
+- 审批策略（ADR-030）：act 先问网关这次调用的决策，只有 require_human 走上图的预演与审批；auto_approve 由网关以 `policy:<规则编号>` 自己签发令牌（不预演，执行后照常测量改动，D32）；deny 由网关直接拒绝。网关在每次调用时按同一策略执行，外部 MCP 客户端也不例外。
 - 预演（ADR-029）：影子环境从会话**当前**数据库的副本启动，绝不写会话自己的数据库；有超时；结束后进程组、端口与目录全部回收。
 - 令牌与参数摘要、预演 digest 绑定：模型在审批后改动参数，网关会拒绝调用；预演未成功而该风险级别要求预演（`approval.require_preview`，默认 destructive）时不签发令牌，只能拒绝；不要求时令牌绑定 `preview_unavailable`，UI 标出"未预演"。
 - 真实执行后按结构比对实际改动与预演（表、主键、改动的列名；时间列只记录不比对），结果写入审计；不一致时记 `preview_mismatch`，UI 标出。
@@ -135,9 +136,9 @@ stateDiagram-v2
   intake --> plan
   plan --> act
   plan --> respond: 计划无效且重试用尽
-  act --> preview: 写 / 破坏性工具
-  preview --> approve: 预演记录（将要改动的行，或失败原因）
-  act --> observe: 只读工具
+  act --> preview: 审批策略判定 require_human（write / destructive 的默认）
+  preview --> approve: 预演记录（将要改动的行，或失败原因；只读调用不预演）
+  act --> observe: 只读工具，或 auto_approve / deny（由网关执行）
   act --> verify: 模型给出文字回答（无工具调用）
   approve --> observe: 批准（携带令牌）
   approve --> plan: 拒绝，或必需的预演未成功（重新规划）
