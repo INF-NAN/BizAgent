@@ -3,12 +3,14 @@
 A token counts as "performance-like" if it is a percentage, a two-decimal score (x.xx) or a
 Pass@k value. Each such token must be a registry value (with the paper disclaimer on the
 same page) or be whitelisted in configs/number_whitelist.yaml with a reason. Application-
-layer effectiveness wording (R3) is rejected outright.
+layer effectiveness wording (R3) is rejected outright. Files listed under `skip_files` there
+(the owner's task books, kept verbatim) are not scanned at all (ADR-028).
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,13 +45,16 @@ class Finding:
 
 def load_whitelist(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"tokens": {}, "files": {}}
+        return {"tokens": {}, "files": {}, "skip_files": {}}
     raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {"tokens": raw.get("tokens") or {}, "files": raw.get("files") or {}}
+    return {k: raw.get(k) or {} for k in ("tokens", "files", "skip_files")}
 
 
-def default_targets(root: Path) -> list[Path]:
-    return [root / "README.md", *sorted((root / "docs").rglob("*.md"))]
+def default_targets(root: Path, skip: Iterable[str] = ()) -> list[Path]:
+    """README.md and docs/**/*.md, minus the repo-relative paths in ``skip``."""
+    skipped = set(skip)
+    files = [root / "README.md", *sorted((root / "docs").rglob("*.md"))]
+    return [f for f in files if f.relative_to(root).as_posix() not in skipped]
 
 
 def scan(files: list[Path], registry: Registry, whitelist: dict[str, Any], root: Path) -> list[Finding]:

@@ -4,6 +4,7 @@
 name = "bizagent-workbench-train"
 version = "0.1.0"
 description = "Training environment: AgentFly (+ its veRL fork) exactly as pinned upstream."
+license = "MIT"  # own code only: third_party/, datasets and models keep their own terms
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # Upstream pins are taken as-is from third_party/AgentFly/pyproject.toml (vllm==0.19.0 etc.).

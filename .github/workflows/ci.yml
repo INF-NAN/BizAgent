@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
       - name: setup
         run: make setup
-      - name: lint
+      - name: lint (ruff, format, mypy; relative links via check-links)
         run: make lint
       - name: secrets
         run: uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files | grep -v -E '^(third_party/|uv\.lock$|train/uv\.lock$)')

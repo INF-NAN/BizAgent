@@ -46,25 +46,28 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | 路径 | 内容 |
 |---|---|
 | `.gitmodules` | 子模块声明（URL、路径、`shallow = true`） |
-| `TASK.md`、`TASK_v2.md`、`CLAUDE.md` | 任务书原文（Phase 0–8、Phase 9–15）；R1–R14 要点与当前状态 |
+| `LICENSE` | 本仓库自有代码的 MIT 许可证（版权人 Yueyi Li）；不覆盖上游、数据集与模型（§3.2） |
+| `CLAUDE.md` | R1–R14 要点与当前状态 |
+| `docs/process/{README,TASK,TASK_v2}.md` | 任务书原文（Phase 0–8、Phase 9–15；2026-09-25 从根目录移入，内容未改）与目录说明 |
 | `docs/verification/**` | Phase 9 起的外部核实记录与真实环境运行日志（N1） |
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
 | `docs/RECON.md` | 上游侦察报告，记录全部"文件:行号" |
 | `docs/UPSTREAM.md` | 本文件 |
-| `docs/DECISIONS.md` | ADR-001 至 ADR-027 |
+| `docs/DECISIONS.md` | ADR-001 至 ADR-028 |
 | `docs/ARCHITECTURE.md` | 分层图与审批写操作时序图 |
 | `docs/WALKTHROUGH.md` | 学习路线 |
 | `docs/LIMITATIONS.md` | 未验证项与已知限制 |
 | `docs/RESULTS.md` | 由 registry 自动生成，勿手改 |
 | `docs/CHANGELOG.md` | prompt 版本变更记录 |
 | `docs/IDEAS.md` | 范围外想法（R13） |
+| `docs/assets/demo-approval.png`、`docs/assets/demo-diff.png` | README 的 mock 演示截图（审批卡片、DB diff），由 `scripts/demo_ui_check.py` 生成 |
 | `docs/runbooks/phase15-gpu.md` | Phase 15 GPU runbook：15A 推理链路、15B smoke 训练、回贴与脱敏要求（仓库主人在自己的 GPU 机器上执行，UNVERIFIED-LOCAL） |
 | `results/registry.yaml` | 论文数字登记（数值来自论文，结构由本仓库维护） |
 | `pyproject.toml`、`uv.lock` | app 环境 |
 | `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，不在 CI 安装）；flash-attn 的构建环境使用锁定的 torch（ADR-027） |
 | `Makefile` | 开发入口 |
 | `.pre-commit-config.yaml`、`.secrets.baseline` | ruff、detect-secrets、submodule 干净检查 |
-| `.github/workflows/ci.yml` | CI（lint、test、check-numbers） |
+| `.github/workflows/ci.yml` | CI（lint 含相对链接检查、secrets、test、check-numbers、doctor） |
 | `.github/workflows/docker-smoke.yml` | Docker 冒烟：构建、启动（不带 gpu profile）、经 HTTP API 走一遍 mock 演示、停止；不推送镜像 |
 | `.gitignore`、`.dockerignore`、`.env.example` | 忽略规则与环境变量模板（无密钥） |
 | `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm）。镜像内含 AWM 代码，只用于本地和 CI 构建，不得推送到任何镜像仓库（§3.1、ADR-003） |
@@ -72,12 +75,13 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `configs/tool_policy.yaml` | 网关风险分级、审批、限流策略 |
 | `configs/serving/arctic-awm-4b.yaml` | vLLM 服务 profile |
 | `configs/pricing.yaml` | 合成账本的价格表（DeepSeek 官方价格页，上界口径） |
-| `configs/number_whitelist.yaml` | 数字守卫白名单 |
+| `configs/number_whitelist.yaml` | 数字守卫白名单；`skip_files` 只豁免两份任务书原文（ADR-028） |
 | `configs/train/{smoke.yaml,smoke_data.json,README.md}` | smoke 训练 profile 与数据 |
 | `scripts/download_data.sh` | 数据集下载脚本（UNVERIFIED-LOCAL） |
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |
-| `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright） |
+| `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright）；生成 README 的两张 mock 演示截图 |
 | `scripts/docker_smoke.py` | Docker 冒烟脚本（只用标准库；测量镜像大小与冷启动耗时） |
+| `scripts/check_links.py` | README 与 `docs/**/*.md` 的相对链接与图片检查（`make lint` 与 CI；只用标准库） |
 | `scripts/redact_paste.py` | Phase 15 回贴内容的脱敏脚本（N1；邮箱、卡号、电话沿用网关审计规则） |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
 | `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019）与训练环境白名单（ADR-026） |
@@ -129,6 +133,12 @@ git -C third_party/AgentFly status --porcelain            # 应为空
   - 如果 AWM 上游将来加入许可证，需要重新评估本节。
 - **数据集（CC-BY-4.0）与模型（Apache-2.0）**：均允许公开展示与使用。本仓库不包含数据与权重，只提供下载脚本；使用数据集须按 CC-BY-4.0 署名（见 §5）。开发与 CI 测试基于手写的迷你夹具，不依赖官方数据。
 - **AgentFly / veRL（Apache-2.0）、OpenEnv（BSD-3-Clause）**：允许公开展示和使用，分发副本时需要保留版权与许可证声明。本仓库只以 submodule 或链接方式引用，不分发副本。
+
+### 3.2 本仓库自有代码的许可证
+
+- 2026-09-25（Phase 16）起，本仓库自有代码按 MIT 授权：根目录 `LICENSE`，版权人 Yueyi Li；`pyproject.toml` 与 `train/pyproject.toml` 的 `license = "MIT"`。
+- MIT 只覆盖 §2.2 所列的本仓库文件。§2.1 的上游、数据集与模型各按 §3 表中的条款；AWM 仍没有许可证，本仓库不对其代码授予任何权利。
+- 仓库中摘自 AgentWorldModel-1K 的内容仍按 CC-BY-4.0 署名（§5），包括 `docs/verification/` 中的运行记录与工具清单，以及迷你夹具借用的接口命名。
 
 ## 4. 数据与权重
 

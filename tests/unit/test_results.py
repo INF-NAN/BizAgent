@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from workbench.results.check_numbers import load_whitelist, scan
+from workbench.results.check_numbers import default_targets, load_whitelist, scan
 from workbench.results.registry import DISCLAIMER, RegistryError, load_registry, render_results_md
 
 REG = Path("results/registry.yaml")
@@ -89,3 +89,28 @@ def test_guard_requires_disclaimer_next_to_paper_numbers(tmp_path: Path) -> None
 
 def test_guard_ignores_versions_and_whitelist(tmp_path: Path) -> None:
     assert _scan(tmp_path, "python 3.12, `pydantic>=2.11`, starlette <0.47, mcp 1.26.0, 2026-09-24\n") == []
+
+
+def test_guard_skips_only_the_listed_files(tmp_path: Path) -> None:
+    (tmp_path / "docs" / "process").mkdir(parents=True)
+    (tmp_path / "README.md").write_text("ok\n", encoding="utf-8")
+    (tmp_path / "docs" / "a.md").write_text("网关带来了成功率提升\n", encoding="utf-8")
+    (tmp_path / "docs" / "process" / "TASK.md").write_text("不得出现成功率提升；61.44\n", encoding="utf-8")
+    (tmp_path / "docs" / "process" / "notes.md").write_text("reaches 87.50\n", encoding="utf-8")
+    wl = {"tokens": {}, "files": {}, "skip_files": {"docs/process/TASK.md": "verbatim task book"}}
+    files = default_targets(tmp_path, skip=wl["skip_files"])
+    assert [f.relative_to(tmp_path).as_posix() for f in files] == [
+        "README.md",
+        "docs/a.md",
+        "docs/process/notes.md",  # same directory, not listed: still scanned
+    ]
+    assert sorted(f.file for f in scan(files, load_registry(REG), wl, tmp_path)) == [
+        "docs/a.md",
+        "docs/process/notes.md",
+    ]
+
+
+def test_guard_exempts_only_the_verbatim_task_books() -> None:
+    skip = load_whitelist(Path("configs/number_whitelist.yaml"))["skip_files"]
+    assert set(skip) == {"docs/process/TASK.md", "docs/process/TASK_v2.md"}  # ADR-028: keep it at two
+    assert all(Path(p).is_file() and str(reason).strip() for p, reason in skip.items())

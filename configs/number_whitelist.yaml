@@ -16,3 +16,9 @@ files:
   docs/verification/cost-ledger.md:
     "0.02": DeepSeek off-peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)
     "0.04": DeepSeek peak cache-hit input price in CNY per 1M tokens, quoted verbatim from the official pricing page (a price, not a metric)
+# Files the guard does not scan at all (ADR-028). Only the owner's task books belong here: they are
+# kept verbatim, quote the forbidden wording as rules and carry the owner's own transcription of
+# the paper's Table 4, which Phase 10 checked; the checked values live in results/registry.yaml.
+skip_files:
+  docs/process/TASK.md: the owner's task book (Phase 0-8), verbatim; its rule R3 quotes the forbidden wording
+  docs/process/TASK_v2.md: the owner's task book (Phase 9-15), verbatim; §2.2 is the owner's transcription of Table 4

@@ -4,7 +4,7 @@ export PYTHONPYCACHEPREFIX := $(CURDIR)/.cache/pycache
 UV ?= uv
 RUN := $(UV) run
 
-.PHONY: setup doctor lint test test-unit test-integration check-numbers results demo-mock data train-lock clean
+.PHONY: setup doctor lint check-links test test-unit test-integration check-numbers results demo-mock data train-lock clean
 
 setup:  ## Create the app env (root) and lock the train env (no GPU install)
 	git submodule update --init third_party/agent-world-model third_party/AgentFly
@@ -15,10 +15,13 @@ setup:  ## Create the app env (root) and lock the train env (no GPU install)
 doctor:
 	$(RUN) workbench doctor
 
-lint:
+lint: check-links
 	$(RUN) ruff check src tests
 	$(RUN) ruff format --check src tests
 	$(RUN) mypy --strict src
+
+check-links:  ## Relative links and images in README.md and docs/**/*.md must resolve
+	$(RUN) python scripts/check_links.py
 
 test:  ## Unit + integration tests, mock LLM only
 	$(RUN) pytest -q

@@ -4,7 +4,9 @@ name: docker-smoke
 # the cold-start time, then stop the stack. See scripts/docker_smoke.py and docs/verification/.
 on:
   push:
-    branches: [phase9-verification, main]
+    # D15 named phase9-verification and main. polish-v3, the branch of Phases 16-18, is added so
+    # its changes (the license field, the approval-preview assertion) are smoked before main.
+    branches: [phase9-verification, main, polish-v3]
 jobs:
   docker-smoke:
     runs-on: ubuntu-latest
