@@ -70,6 +70,42 @@ def doctor() -> None:
     raise typer.Exit(code=exit_code(results))
 
 
+@app.command()
+def verify(
+    input_dir: Path = typer.Option(..., "--input", help="`awm agent` output dir (has trajectory.json)."),
+    mode: str = typer.Option(
+        "code", "--mode", help="code: the dataset's pure-code verifier, no LLM; sql: verifier + LLM judge."
+    ),
+    verifier: Path | None = typer.Option(
+        None,
+        "--verifier",
+        help="Verifier file (default: gen_verifier.pure_code.jsonl / gen_verifier.jsonl in env.dataset_dir).",
+    ),
+    init_db: Path | None = typer.Option(None, "--init-db", help="Initial database (<input>/initial.db)."),
+    final_db: Path | None = typer.Option(None, "--final-db", help="Final database (<input>/final.db)."),
+    judge_model: str | None = typer.Option(
+        None, "--judge-model", help="sql mode: judge model (default AWM_SYN_OVERRIDE_MODEL)."
+    ),
+) -> None:
+    """Run `awm verify` once; no key reaches the verifier code (sql judge via the local proxy, ADR-025)."""
+    from workbench.verify import VerifyError, run_verify
+
+    try:
+        summary = run_verify(
+            get_settings(),
+            input_dir,
+            mode=mode,
+            verifier=verifier,
+            init_db=init_db,
+            final_db=final_db,
+            judge_model=judge_model,
+        )
+    except VerifyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=summary)
+
+
 def _env_client() -> RemoteEnvService:
     from workbench.envs.service import RemoteEnvService
 

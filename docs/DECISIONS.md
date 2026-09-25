@@ -314,7 +314,7 @@
     - 经代理时仍能看到占位 key 和代理地址，可以经代理发起 LLM 调用（会产生费用，并记入账本），但拿不到上游 key；
     - 不经代理时会看到真实的 `OPENAI_API_KEY`。
     - 不改上游就无法把这两个步骤的"调用 LLM"和"执行生成代码"分开。
-  - `awm verify` 无法隔离：它在同一进程里执行 verifier 代码（`awm/core/verify.py:104-126`、`:151-174`，namespace 中直接提供了 `os`），又用环境中的 key 调用裁判（`:230-302`、`:419-421`）。不改上游就无法隔离，见 LIMITATIONS。
+  - `awm verify` 无法隔离：它在同一进程里执行 verifier 代码（`awm/core/verify.py:104-126`、`:151-174`，namespace 中直接提供了 `os`），又用环境中的 key 调用裁判（`:230-302`、`:419-421`）。不改上游就无法隔离，见 LIMITATIONS。（2026-09-25 起由 ADR-025 的 `workbench verify` 解决。）
   - `awm agent --scenario` 自动起服时，server 继承 `awm agent` 的环境（`awm/core/server.py:174-195` 的 `Popen` 没有传 `env=`）。本仓库只用 `--mcp_url` 模式连接 env-manager 启动的 server。
 
 ## ADR-020 Arctic-AWM 的 vLLM serving profile 启用 `hermes` tool parser
@@ -539,3 +539,45 @@
   - 5xx、网络错误与超时的请求可能已经在上游计费，账本只能按 0 计。
   - 同一步骤里正文完全相同的两个请求，会被当作同一个请求的两次尝试。
   - `done_with_failures` 的步骤输出缺少那些请求的结果，下游步骤照常运行。阈值设为大于 0，就意味着接受不完整的产物。
+
+## ADR-025 `workbench verify`：`awm verify` 不再拿到任何 key
+
+- **背景**：
+  - ADR-019 留下的缺口：`awm verify` 在同一个进程里做两件事，不改上游就无法把它们分开：
+    - 执行数据集中的 verifier 代码，namespace 里直接提供了 `os`（`awm/core/verify.py:104-126`、`:151-174`）；
+    - sql 模式下，从同一进程的环境变量读取裁判的地址与 key（`:416-433` 调用 `resolve_llm_config`，`awm/tools.py:386-437`）。
+  - Phase 12 直接在带 key 的 shell 里运行 `awm verify`，verifier 代码能读到 `DEEPSEEK_API_KEY`。
+  - 仓库主人的决定 D13(a)、D18：执行 Phase 15 之前，让 `awm verify` 经本地代理运行、只拿占位 key。
+- **源码确认**（AWM @ `85e322f`）：
+  - 只有 `--mode sql` 会调用 LLM 裁判；`--mode code` 执行确定性的 verifier，直接返回 `complete` 或 `others`（`awm/core/verify.py:416-433`；配置检查也只针对 sql 模式，`:51-80`）。
+  - 官方数据集同时提供两种 verifier：`gen_verifier.jsonl`（sql）与 `gen_verifier.pure_code.jsonl`（code），默认路径见 `:376-379`。
+- **可选方案**：
+  1. 只在文档里要求"先清空环境再运行"：依赖使用者自觉，无法测试；
+  2. 新增包装命令：code 模式只给白名单环境；sql 模式启动本地代理，`awm verify` 只拿到代理地址和占位 key，真实的上游地址与 key 留在 workbench 进程里。这与合成流水线的做法相同（ADR-011、ADR-019）。
+- **决定**：选方案 2，新增 `workbench verify`（`src/workbench/verify.py`、`src/workbench/cli.py`）。
+  - **参数**：
+    - `--input`：`awm agent` 的输出目录；
+    - `--mode`：`code` 或 `sql`，默认 `code`；
+    - `--verifier`：verifier 文件，默认取 `env.dataset_dir` 下对应模式的官方文件；
+    - `--init-db`、`--final-db`：初始与最终数据库；
+    - `--judge-model`：sql 模式的裁判模型，默认读 `AWM_SYN_OVERRIDE_MODEL`。
+  - **code 模式**：子进程只拿到 ADR-019 的白名单（`generated_code_env`），没有任何 key。
+  - **sql 模式**：
+    - 裁判的上游地址与 key 仍从 workbench 进程的 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 读取（与 `synth.upstream_*_env` 相同）；
+    - `awm verify` 子进程在白名单之外只拿到四个变量：`AWM_SYN_LLM_PROVIDER=openai`、代理地址、占位 key `workbench-proxy`、裁判模型；
+    - 代理使用随机空闲端口，账本写在输出目录的 `verify_ledger.jsonl`，缓存写在 `verify_llm_cache/`。同一次验证再跑一遍时，直接返回缓存的裁判结论，不再调用。
+  - **输出**：`awm verify` 自己写出 `verify.<mode>.json`；包装命令打印摘要（`reward_type`、裁判结论、裁判调用次数），日志写在 `verify.<mode>.log`。
+  - **其它**：占位 key 改为 `workbench.synth.proxy.PLACEHOLDER_KEY`，合成流水线与本命令共用。
+- **验证**（零成本，`tests/integration/test_verify_real_awm.py`，真实的 `awm verify` 子进程）：
+  - 测试在启动环境里植入 `DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`HF_TOKEN`，并让 verifier 代码报告它在 `awm verify` 里能看到什么。
+  - **对照组**：按 Phase 12 的方式带完整环境运行 `awm verify`，verifier 代码能看到全部三个植入的变量。
+  - **code 模式**：一个也看不到；除白名单外，没有任何变量来自启动环境。
+  - **sql 模式**：
+    - verifier 代码只看到占位 key；
+    - 本地的假裁判收到了代理带上的真实 key 与指定的模型，结论为 `complete`；
+    - 再跑一遍时由缓存返回，假裁判没有收到第二次调用。
+  - **反向对照**：把包装命令的环境改回完整环境后，code 与 sql 两项测试都失败。
+- **代价**：
+  - 只有通过 `workbench verify` 运行时才有隔离，直接运行 `awm verify` 仍会把 shell 里的 key 交给 verifier 代码。runbook 与文档都改用本命令。
+  - sql 模式下，verifier 代码仍能看到代理地址和占位 key，可以经代理发起 LLM 调用。这些调用会记入 `verify_ledger.jsonl`，但本命令没有预算上限。
+  - 与 ADR-019 相同，只隔离环境变量，同一用户可读的文件仍然可读。

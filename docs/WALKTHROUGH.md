@@ -350,6 +350,16 @@ LLM judge classification: agent_error
 Saved verification result to data/p12/awm-agent/e_commerce_33_task_0/verify.sql.json
 ```
 
+Phase 15 起不再直接运行 `awm verify`，改用 `workbench verify`（ADR-025）：
+
+- code 模式不调用 LLM，子进程拿不到任何 key；
+- sql 模式经本地代理调用裁判，子进程只拿到占位 key。
+
+```bash
+workbench verify --input data/p12/awm-agent/e_commerce_33_task_0 --mode code \
+  --init-db data/p12/awm-runs/p12awm/initial.db --final-db data/p12/awm-runs/p12awm/work.db
+```
+
 最后在 UI 的 Trajectory viewer 标签页用文件输入框加载这次的 `trajectory.json`，显示 "AWM trajectory · scenario e_commerce_33 · task 0 · 2 iterations" 和两个步骤。以上输出只证明链路打通，裁判的分类不构成评测，也不得汇总成比率。详见 `docs/verification/2026-09-24-llm-chain.md` §4–6。
 
 ### 5.3 Phase 12.5 修复后的确认运行（单次链路演示，不构成评测）

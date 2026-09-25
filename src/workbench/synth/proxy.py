@@ -30,6 +30,9 @@ from starlette.routing import Route
 
 from workbench.synth.ledger import Ledger, LedgerEntry, Price
 
+# What a process behind the proxy gets instead of the upstream key (ADR-019, ADR-025).
+PLACEHOLDER_KEY = "workbench-proxy"  # pragma: allowlist secret
+
 
 def cache_key(endpoint: str, body: bytes) -> str:
     return hashlib.sha256(endpoint.encode() + b"\n" + body).hexdigest()

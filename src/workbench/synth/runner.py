@@ -48,6 +48,7 @@ from workbench.config import Settings
 from workbench.envs.procs import descendants, live_group_members
 from workbench.subprocess_env import LLM_VARS, NETWORK_VARS, generated_code_env, pick
 from workbench.synth.ledger import Ledger, Price, StepRequests, load_prices, step_requests
+from workbench.synth.proxy import PLACEHOLDER_KEY
 from workbench.synth.validate import ValidationReport, parse_check_all
 
 STEPS = ("scenario", "task", "db", "sample", "spec", "env", "verifier")
@@ -479,9 +480,9 @@ class SynthRunner:
                 {
                     "AWM_SYN_LLM_PROVIDER": "openai",
                     "OPENAI_BASE_URL": base,
-                    "OPENAI_API_KEY": "workbench-proxy",  # pragma: allowlist secret
+                    "OPENAI_API_KEY": PLACEHOLDER_KEY,
                     "EMBEDDING_OPENAI_BASE_URL": base,
-                    "EMBEDDING_OPENAI_API_KEY": "workbench-proxy",  # pragma: allowlist secret
+                    "EMBEDDING_OPENAI_API_KEY": PLACEHOLDER_KEY,
                 }
             )
         else:
