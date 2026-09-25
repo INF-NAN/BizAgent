@@ -668,3 +668,4 @@
   - `make check-numbers` 输出 `scanned 27 files (2 exempt as skip_files); 0 finding(s)`（27 个文件含新增的 `docs/process/README.md`）；
   - `tests/unit/test_results.py` 新增两个测试：同一目录下未列出的文件仍被扫描；豁免清单恰好是这两个文件，且文件存在。
 - **代价**：任务书中的数字不再受守卫检查。它们只是转录，不是本仓库的结论；论文数字的唯一来源仍是 registry。
+- **补充（2026-09-25，D28）**：仓库主人要求把本轮任务原文存为 `docs/process/TASK_v3.md` 并同样豁免；`skip_files` 与固定它的单测随之改为三个文件。

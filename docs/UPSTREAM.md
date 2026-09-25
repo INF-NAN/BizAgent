@@ -48,7 +48,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `.gitmodules` | 子模块声明（URL、路径、`shallow = true`） |
 | `LICENSE` | 本仓库自有代码的 MIT 许可证（版权人 Yueyi Li）；不覆盖上游、数据集与模型（§3.2） |
 | `CLAUDE.md` | R1–R14 要点与当前状态 |
-| `docs/process/{README,TASK,TASK_v2}.md` | 任务书原文（Phase 0–8、Phase 9–15；2026-09-25 从根目录移入，内容未改）与目录说明 |
+| `docs/process/{README,TASK,TASK_v2,TASK_v3}.md` | 任务书原文（Phase 0–8、Phase 9–15 于 2026-09-25 从根目录移入，内容未改；Phase 16–18 取自对话，按原样存档）与目录说明 |
 | `docs/verification/**` | Phase 9 起的外部核实记录与真实环境运行日志（N1） |
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
 | `docs/RECON.md` | 上游侦察报告，记录全部"文件:行号" |
@@ -75,7 +75,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `configs/tool_policy.yaml` | 网关风险分级、审批、限流策略 |
 | `configs/serving/arctic-awm-4b.yaml` | vLLM 服务 profile |
 | `configs/pricing.yaml` | 合成账本的价格表（DeepSeek 官方价格页，上界口径） |
-| `configs/number_whitelist.yaml` | 数字守卫白名单；`skip_files` 只豁免两份任务书原文（ADR-028） |
+| `configs/number_whitelist.yaml` | 数字守卫白名单；`skip_files` 只豁免三份任务书原文（ADR-028、D28） |
 | `configs/train/{smoke.yaml,smoke_data.json,README.md}` | smoke 训练 profile 与数据 |
 | `scripts/download_data.sh` | 数据集下载脚本（UNVERIFIED-LOCAL） |
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |

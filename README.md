@@ -131,4 +131,4 @@ AgentWorldModel-1K，作者 Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md)：未验证项与已知限制
 - [docs/RECON.md](docs/RECON.md)：上游侦察报告
 - [docs/RESULTS.md](docs/RESULTS.md)：论文数字（自动生成）
-- [docs/process/](docs/process/README.md)：任务书原文（[TASK.md](docs/process/TASK.md)、[TASK_v2.md](docs/process/TASK_v2.md)）；[CLAUDE.md](CLAUDE.md)：工作守则与当前状态
+- [docs/process/](docs/process/README.md)：任务书原文（[TASK.md](docs/process/TASK.md)、[TASK_v2.md](docs/process/TASK_v2.md)、[TASK_v3.md](docs/process/TASK_v3.md)）；[CLAUDE.md](CLAUDE.md)：工作守则与当前状态

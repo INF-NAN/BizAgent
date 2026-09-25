@@ -112,5 +112,6 @@ def test_guard_skips_only_the_listed_files(tmp_path: Path) -> None:
 
 def test_guard_exempts_only_the_verbatim_task_books() -> None:
     skip = load_whitelist(Path("configs/number_whitelist.yaml"))["skip_files"]
-    assert set(skip) == {"docs/process/TASK.md", "docs/process/TASK_v2.md"}  # ADR-028: keep it at two
+    # ADR-028 (and D28 for TASK_v3): only the owner's verbatim task books, nothing else
+    assert set(skip) == {"docs/process/TASK.md", "docs/process/TASK_v2.md", "docs/process/TASK_v3.md"}
     assert all(Path(p).is_file() and str(reason).strip() for p, reason in skip.items())
