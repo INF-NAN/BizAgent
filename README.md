@@ -57,6 +57,8 @@ python3 scripts/docker_smoke.py   # 构建 → 启动 env-manager 与 app → �
 
 GitHub Actions 的 docker-smoke 任务在每次 push 到 `phase9-verification` 与 `main` 时运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
 
+镜像内含 AWM 代码，而 AWM 没有许可证，所以镜像只用于本地和 CI 构建，不得推送到任何镜像仓库（ADR-003）。
+
 完整学习路线见 [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)。
 
 ## GPU 部署路径（UNVERIFIED-LOCAL）

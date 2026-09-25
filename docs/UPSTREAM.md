@@ -64,25 +64,28 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `Makefile` | 开发入口 |
 | `.pre-commit-config.yaml`、`.secrets.baseline` | ruff、detect-secrets、submodule 干净检查 |
 | `.github/workflows/ci.yml` | CI（lint、test、check-numbers） |
+| `.github/workflows/docker-smoke.yml` | Docker 冒烟：构建、启动（不带 gpu profile）、经 HTTP API 走一遍 mock 演示、停止；不推送镜像 |
 | `.gitignore`、`.dockerignore`、`.env.example` | 忽略规则与环境变量模板（无密钥） |
-| `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm） |
+| `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm）。镜像内含 AWM 代码，只用于本地和 CI 构建，不得推送到任何镜像仓库（§3.1、ADR-003） |
 | `configs/app.yaml` | 应用默认配置 |
 | `configs/tool_policy.yaml` | 网关风险分级、审批、限流策略 |
 | `configs/serving/arctic-awm-4b.yaml` | vLLM 服务 profile |
-| `configs/pricing.yaml` | 合成账本的价格表（占位值） |
+| `configs/pricing.yaml` | 合成账本的价格表（DeepSeek 官方价格页，上界口径） |
 | `configs/number_whitelist.yaml` | 数字守卫白名单 |
 | `configs/train/{smoke.yaml,smoke_data.json,README.md}` | smoke 训练 profile 与数据 |
 | `scripts/download_data.sh` | 数据集下载脚本（UNVERIFIED-LOCAL） |
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |
 | `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright） |
+| `scripts/docker_smoke.py` | Docker 冒烟脚本（只用标准库；测量镜像大小与冷启动耗时） |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
+| `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019） |
 | `src/workbench/envs/*.py` | 环境管理：端口、快照与 diff、健康检查、场景目录、AWM 适配、进程组管理、env-manager 服务 |
 | `src/workbench/gateway/*.py` | MCP 网关：策略、限流、审计、错误归一、上游连接、核心、server |
 | `src/workbench/llm/**` | LLM 客户端：类型、错误、`<tool_call>` 解析、mock replay 与 OpenAI 兼容后端、vLLM 命令生成 |
 | `src/workbench/agent/**` | LangGraph 智能体：状态、守卫、记忆、prompt（版本化）、节点、图、runner |
 | `src/workbench/api/*.py` | HTTP API、SSE、schema |
 | `src/workbench/obs/*.py` | trace（JSONL）与 Prometheus 指标 |
-| `src/workbench/synth/*.py` | 合成编排：步骤计划、checkpoint、LLM 代理（缓存、重试、账本）、校验报告 |
+| `src/workbench/synth/*.py` | 合成编排：步骤计划、checkpoint、LLM 代理（缓存、重试、账本、预算熔断）、中断回收、校验报告 |
 | `src/workbench/train/*.py` | 训练启动器：profile（R2 约束）、preflight、launch |
 | `src/workbench/results/*.py` | registry 加载与 RESULTS.md 生成；数字守卫 |
 | `ui/{index.html,app.js,style.css}` | 静态 UI（无构建步骤） |
@@ -115,6 +118,11 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 - **AWM（阻断项，已按 ADR-003 处理）**：代码没有任何许可证，默认保留全部权利。
   - 仓库主人未就此答复，按 ADR-003 采用最保守做法：只含 gitlink（指向其公开仓库的指针），不包含 AWM 代码副本，也不做任何 patch；
   - 运行时由使用者自行从 AWM 公开仓库获取代码并在本地执行；README 显著位置写明 AWM 无许可证；
+  - **Docker 镜像**（仓库主人决定 D20，2026-09-25）：
+    - `Dockerfile` 把 `third_party/agent-world-model` 复制进镜像（`COPY third_party/agent-world-model third_party/agent-world-model`），所以构建出的镜像内含 AWM 代码；
+    - 由于 AWM 目前没有许可证，**镜像只用于本地和 CI 构建，不得推送到任何公开或私有的镜像仓库**；
+    - 2026-09-25 检查：`.github/workflows/` 下只有 `ci.yml` 与 `docker-smoke.yml`，都没有登录镜像仓库或推送镜像的步骤，`push` 只作为 git 触发条件出现；仓库其它受版本控制的文件中也没有 `docker push`、`docker compose push`、`docker login` 之类的命令；
+    - docker-smoke 在 GitHub 托管 runner 上构建的镜像随 runner 回收，不上传。
   - 如果 AWM 上游将来加入许可证，需要重新评估本节。
 - **数据集（CC-BY-4.0）与模型（Apache-2.0）**：均允许公开展示与使用。本仓库不包含数据与权重，只提供下载脚本；使用数据集须按 CC-BY-4.0 署名（见 §5）。开发与 CI 测试基于手写的迷你夹具，不依赖官方数据。
 - **AgentFly / veRL（Apache-2.0）、OpenEnv（BSD-3-Clause）**：允许公开展示和使用，分发副本时需要保留版权与许可证声明。本仓库只以 submodule 或链接方式引用，不分发副本。
