@@ -24,7 +24,7 @@ make doctor     # 缺少官方数据集和 GPU 只会给出 warn，不算失败
 
 如果已用 `make data` 下载官方数据集，可以把命令中的 `mini_e_commerce` 换成官方场景（例如 `e_commerce_33`），并去掉 `--dataset-dir` 参数：`workbench env up e_commerce_33` 启动后 `list_tools` 返回 39 个工具（`docs/verification/2026-09-24-dataset.md`）。
 
-先读：`TASK.md`（任务书）、`CLAUDE.md`（规则摘要）、`docs/RECON.md`（上游事实与行号）、`docs/ARCHITECTURE.md`。
+先读：`docs/process/TASK.md`（任务书）、`CLAUDE.md`（规则摘要）、`docs/RECON.md`（上游事实与行号）、`docs/ARCHITECTURE.md`。
 
 ---
 

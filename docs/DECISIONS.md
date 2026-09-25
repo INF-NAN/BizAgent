@@ -646,3 +646,25 @@
 - **代价**：
   - `extra-build-dependencies` 在 uv 中仍是实验特性（uv 0.8.17 会打印 warning），行为可能随 uv 版本变化，所以 runbook 固定使用 uv 0.8.17；
   - 构建环境仍然要从 PyPI 取得 torch 2.10.0（与运行环境共用 uv 缓存），编译时间不变。
+
+## ADR-028 任务书原文移入 `docs/process/`，数字守卫按文件豁免
+
+- **背景**：
+  - Phase 16 按仓库主人的要求，把 `TASK.md`、`TASK_v2.md` 从根目录移到 `docs/process/`，`CLAUDE.md` 留在根目录。
+  - 数字守卫（`make check-numbers`）扫描 README 与 `docs/**/*.md`，移动后两份任务书进入其范围。直接用 `scan()` 扫描这两份文件，共得到 69 条发现：
+    - `TASK.md` 的 R3 条文原样引用了守卫 `FORBIDDEN` 列表中的两条中文措辞，2 条；
+    - `TASK_v2.md` §2.2 是仓库主人对论文 Table 4 的转录，大部分列不在 registry 中，66 条；
+    - 同一文件引用了 registry 中的值，但没有 R3 免责声明，1 条。
+  - 两份任务书是仓库主人的原文，不是本仓库的结论；改写它们，原文就失去了意义。
+- **可选方案**：
+  1. 修改任务书，删去或改写被拦截的内容：违背"原样保留"；
+  2. 把整个 `docs/process/` 排除在守卫之外：范围过宽，以后放进这个目录的任何文档都不再受检查；
+  3. 在 `configs/number_whitelist.yaml` 中新增 `skip_files`，逐个列出豁免的文件并写明理由。
+- **决定**：
+  - 选方案 3，`skip_files` 只含这两份任务书。
+  - `docs/process/README.md` 照常受检查，并向读者说明：论文数字以 registry 为准，附 R3 免责声明。
+  - 单元测试把 `skip_files` 固定为这两个文件；以后要新增豁免，必须同时修改测试与本 ADR。
+- **验证**：
+  - `make check-numbers` 输出 `scanned 27 files (2 exempt as skip_files); 0 finding(s)`（27 个文件含新增的 `docs/process/README.md`）；
+  - `tests/unit/test_results.py` 新增两个测试：同一目录下未列出的文件仍被扫描；豁免清单恰好是这两个文件，且文件存在。
+- **代价**：任务书中的数字不再受守卫检查。它们只是转录，不是本仓库的结论；论文数字的唯一来源仍是 registry。
