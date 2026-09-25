@@ -4,7 +4,9 @@ Clients connect to ``/mcp`` and identify their session with the ``X-Workbench-Se
 header. ``list_tools`` returns the session's allowlisted tools with ``<scenario>__`` prefixes;
 ``call_tool`` goes through Gateway.call_tool (policy, rate limit, audit, normalization).
 Write/destructive tools need a one-time token in ``X-Approval-Token`` issued by the
-application layer (``POST /admin/approvals`` here, or the API's approval flow).
+application layer (``POST /admin/approvals`` here, or the API's approval flow). Every token is
+bound to a preview (ADR-029): ``POST /admin/previews`` runs one and returns its record, and
+``/admin/approvals`` takes its ``preview_id`` or runs the preview itself before issuing.
 
 MCP SDK 1.26.0 facts used (docs/RECON.md): lowlevel ``Server.call_tool(validate_input=...)``
 (mcp/server/lowlevel/server.py:492) accepts a returned ``CallToolResult`` as-is (:539-540);
@@ -30,6 +32,7 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from workbench.gateway.core import Gateway, UnknownSessionError
+from workbench.gateway.policy import ApprovalError
 
 SESSION_HEADER = "x-workbench-session"
 APPROVAL_HEADER = "x-approval-token"
@@ -95,11 +98,19 @@ class RegisterRequest(BaseModel):
     tool_methods: dict[str, str] = {}
 
 
+class PreviewRequest(BaseModel):
+    session_id: str
+    tool: str
+    arguments: dict[str, Any] = {}
+
+
 class ApprovalRequest(BaseModel):
     session_id: str
     tool: str
     arguments: dict[str, Any] = {}
     approver: str
+    # a preview from POST /admin/previews; without it the preview runs here, before the token
+    preview_id: str | None = None
 
 
 def create_gateway_app(gateway: Gateway) -> Starlette:
@@ -119,13 +130,37 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
         )
         return JSONResponse({"session_id": route.session_id, "tools": sorted(route.allowlist)})
 
+    async def preview(request: Request) -> JSONResponse:
+        req = PreviewRequest.model_validate(await request.json())
+        try:
+            record = await gateway.preview(req.session_id, req.tool, req.arguments)
+        except UnknownSessionError:
+            return JSONResponse({"error": "unknown session"}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(record)
+
     async def approve(request: Request) -> JSONResponse:
         req = ApprovalRequest.model_validate(await request.json())
         try:
-            token = gateway.issue_approval(req.session_id, req.tool, req.arguments, req.approver)
+            record = (
+                None if req.preview_id else await gateway.preview(req.session_id, req.tool, req.arguments)
+            )
+            token = gateway.issue_approval(
+                req.session_id,
+                req.tool,
+                req.arguments,
+                req.approver,
+                preview=record,
+                preview_id=req.preview_id,
+            )
         except UnknownSessionError:
             return JSONResponse({"error": "unknown session"}, status_code=404)
-        return JSONResponse({"token": token})
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except ApprovalError as exc:  # a required preview failed: only a rejection is possible
+            return JSONResponse({"error": str(exc), "preview": record}, status_code=409)
+        return JSONResponse({"token": token, "preview": record})
 
     async def risk(request: Request) -> JSONResponse:
         sid = request.path_params["sid"]
@@ -143,6 +178,7 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
         routes=[
             Route("/mcp", endpoint=_McpEndpoint(), methods=["GET", "POST", "DELETE"]),
             Route("/admin/sessions", register, methods=["POST"]),
+            Route("/admin/previews", preview, methods=["POST"]),
             Route("/admin/approvals", approve, methods=["POST"]),
             Route("/admin/risk/{sid}", risk, methods=["GET"]),
         ],

@@ -7,6 +7,7 @@ import json
 import socket
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 from mcp import ClientSession
@@ -14,6 +15,7 @@ from mcp.client.streamable_http import streamablehttp_client
 
 from workbench.config import GatewaySettings
 from workbench.envs.manager import EnvManager
+from workbench.envs.service import LocalEnvService
 from workbench.gateway.core import Gateway
 from workbench.gateway.policy import ApprovalService
 from workbench.gateway.server import create_gateway_app
@@ -30,7 +32,11 @@ def _port() -> int:
 async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManager, tmp_path: Path) -> None:
     env = await manager.start("mini_e_commerce", session_id="gw1")
     audit = tmp_path / "audit.jsonl"
-    gateway = Gateway(GatewaySettings(audit_path=audit), approvals=ApprovalService(secret=b"test"))
+    gateway = Gateway(
+        GatewaySettings(audit_path=audit),
+        approvals=ApprovalService(secret=b"test"),
+        previews=LocalEnvService(manager),  # destructive approvals need a preview (ADR-029)
+    )
     await gateway.register_session("gw1", env.scenario, env.url)
 
     port = _port()
@@ -74,9 +80,19 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
                 "trace_id": empty.structuredContent["trace_id"],
             }
 
-        token = gateway.issue_approval(
-            "gw1", "mini_e_commerce__delete_user_payment_method", {"payment_method_id": 2}, "alice"
-        )
+        # the admin endpoint previews the call in a shadow env before it issues the token
+        body = {
+            "session_id": "gw1",
+            "tool": "mini_e_commerce__delete_user_payment_method",
+            "arguments": {"payment_method_id": 2},
+            "approver": "alice",
+        }
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=120) as admin:
+            granted = (await admin.post("/admin/approvals", json=body)).json()
+        token = granted["token"]
+        removed = granted["preview"]["changes"]["tables"]["payment_methods"]["removed"]
+        assert granted["preview"]["status"] == "ok" and [r["key"] for r in removed] == [2]
+        assert manager.diff("gw1").tables["payment_methods"].removed == []  # the preview left it alone
         async with (
             streamablehttp_client(url, headers={**headers, "X-Approval-Token": token}) as (r, w, _),
             ClientSession(r, w) as s,
@@ -92,5 +108,7 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
     rows = [json.loads(ln) for ln in audit.read_text().splitlines()]
     decisions = [(r["tool"].split("__")[1], r["decision"], r["approver"]) for r in rows]
     assert ("delete_user_payment_method", "approval_required", None) in decisions
+    assert ("delete_user_payment_method", "preview", None) in decisions
     assert ("delete_user_payment_method", "allowed", "alice") in decisions
+    assert rows[-1]["preview_check"]["result"] == "match"
     assert manager.diff("gw1").tables["payment_methods"].removed == [2]

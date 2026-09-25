@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from workbench.config import GatewaySettings
+from workbench.config import ApprovalSettings, GatewaySettings
 from workbench.gateway.audit import AuditLogger
 from workbench.gateway.core import Gateway, UnknownSessionError
 from workbench.gateway.policy import ApprovalService, PolicyConfig
@@ -76,6 +76,8 @@ async def test_read_allowed_and_audited(gw: tuple[Gateway, FakeUpstream]) -> Non
 
 async def test_destructive_denied_without_approval_then_allowed(gw: tuple[Gateway, FakeUpstream]) -> None:
     g, up = gw
+    # token mechanics only: previews are covered in test_gateway_preview.py (ADR-029)
+    g.approval_settings = ApprovalSettings(require_preview={"write": False, "destructive": False})
     await g.register_session("s1", "mini", "http://x/mcp")
     args = {"payment_method_id": 2}
     denied = await g.call_tool("s1", "mini__delete_user_payment_method", args)

@@ -71,6 +71,11 @@ class AuditRecord:
     status: str
     duration_ms: float
     ts: float = 0.0
+    # approval previews (ADR-029): the preview itself (decision "preview"), or on an approved call
+    # the preview it was bound to, and how its real changes compared (match / preview_mismatch /
+    # preview_unavailable / check_failed, the differences and the ignored columns)
+    preview: dict[str, Any] | None = None
+    preview_check: dict[str, Any] | None = None
 
 
 class AuditLogger:

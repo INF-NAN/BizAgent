@@ -241,14 +241,22 @@ def env_search(keyword: str, dataset_dir: Path | None = typer.Option(None, "--da
 
 @gateway_app.command("serve")
 def gateway_serve() -> None:
-    """Run the MCP gateway standalone (MCP at /mcp, admin endpoints under /admin)."""
+    """Run the MCP gateway standalone (MCP at /mcp, admin endpoints under /admin).
+
+    Approval previews need an env-manager (``env.manager_url``); without one they are unavailable,
+    so levels that require a preview (destructive by default) cannot be approved here (ADR-029).
+    """
     import uvicorn
 
+    from workbench.envs.service import RemoteEnvService
     from workbench.gateway.core import Gateway
     from workbench.gateway.server import create_gateway_app
 
-    s = get_settings().gateway
-    uvicorn.run(create_gateway_app(Gateway(s)), host=s.host, port=s.port)
+    settings = get_settings()
+    s = settings.gateway
+    previews = RemoteEnvService(settings.env.manager_url) if settings.env.manager_url else None
+    gateway = Gateway(s, approval=settings.approval, previews=previews)
+    uvicorn.run(create_gateway_app(gateway), host=s.host, port=s.port)
 
 
 @gateway_app.command("export-risk")
