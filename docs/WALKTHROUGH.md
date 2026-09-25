@@ -281,7 +281,11 @@ answer I added 'Wireless Noise Cancelling Headphones A' ($189) to your cart (qua
 make demo-mock          # 打开 http://127.0.0.1:8080/ui/
 ```
 
-在 UI 中：选择场景 → Start isolated session → 发送上面的请求 → 在审批面板点 Approve → 查看 Timeline 与 DB diff 标签页。`scripts/demo_ui_check.py` 用 Playwright 自动走一遍同样的流程。
+在 UI 中：选择场景 → Start isolated session → 发送上面的请求 → 在审批面板点 Approve → 查看 Timeline 与 DB diff 标签页。`scripts/demo_ui_check.py` 用 Playwright 自动走一遍同样的流程，并把审批卡片与 DB diff 两张截图保存到 `docs/assets/`（README 首屏的 mock 演示截图）：
+
+```bash
+uv run --with playwright python scripts/demo_ui_check.py <截图目录> [chromium 路径]   # 先在另一个终端执行 make demo-mock
+```
 
 注意：mock 回答来自手写脚本，不是模型输出，不代表任何模型能力。
 

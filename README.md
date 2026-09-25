@@ -8,6 +8,13 @@
 
 **一句话定位**：把 AWM 的合成环境与 AgentFly 的训练框架，组织成一个可部署、可审计、可演示的企业 MCP 智能体工作台。只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"。
 
+<p>
+  <img src="docs/assets/demo-approval.png" width="400" align="top" alt="审批卡片：写操作 add_item_to_cart 等待人工批准">
+  <img src="docs/assets/demo-diff.png" width="400" align="top" alt="批准后的 DB diff：cart_items 由 1 行变为 2 行">
+</p>
+
+*mock 演示截图*：左为写操作 `add_item_to_cart` 的审批卡片，右为批准后与初始数据库比较的 DB diff（`cart_items` 新增一行）。回答来自手写的 mock 脚本，不是模型输出；截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成。
+
 > ⚠️ **上游许可证声明**：Snowflake-Labs/agent-world-model **未声明任何许可证**。本仓库只以 git submodule 指针引用它，不包含其代码副本，也不修改其代码；本仓库**不对 AWM 代码授予任何权利**。使用前请自行判断（详见 [docs/UPSTREAM.md](docs/UPSTREAM.md)、ADR-003）。
 
 ## 架构

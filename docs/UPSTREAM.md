@@ -59,6 +59,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `docs/RESULTS.md` | 由 registry 自动生成，勿手改 |
 | `docs/CHANGELOG.md` | prompt 版本变更记录 |
 | `docs/IDEAS.md` | 范围外想法（R13） |
+| `docs/assets/demo-approval.png`、`docs/assets/demo-diff.png` | README 的 mock 演示截图（审批卡片、DB diff），由 `scripts/demo_ui_check.py` 生成 |
 | `docs/runbooks/phase15-gpu.md` | Phase 15 GPU runbook：15A 推理链路、15B smoke 训练、回贴与脱敏要求（仓库主人在自己的 GPU 机器上执行，UNVERIFIED-LOCAL） |
 | `results/registry.yaml` | 论文数字登记（数值来自论文，结构由本仓库维护） |
 | `pyproject.toml`、`uv.lock` | app 环境 |
@@ -77,7 +78,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `configs/train/{smoke.yaml,smoke_data.json,README.md}` | smoke 训练 profile 与数据 |
 | `scripts/download_data.sh` | 数据集下载脚本（UNVERIFIED-LOCAL） |
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |
-| `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright） |
+| `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright）；生成 README 的两张 mock 演示截图 |
 | `scripts/docker_smoke.py` | Docker 冒烟脚本（只用标准库；测量镜像大小与冷启动耗时） |
 | `scripts/redact_paste.py` | Phase 15 回贴内容的脱敏脚本（N1；邮箱、卡号、电话沿用网关审计规则） |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
