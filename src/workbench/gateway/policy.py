@@ -47,6 +47,12 @@ class PolicyConfig:
         )
 
 
+def needs_approval_by_default(risk: str, config: PolicyConfig) -> bool:
+    """Whether a call of this risk level needs approval when no approval rule matches: write and
+    destructive always (ADR-030); read only if the tool policy's ``require_approval`` lists it."""
+    return risk in ("write", "destructive") or risk in config.require_approval
+
+
 def _level(value: Any) -> RiskLevel:
     if value not in LEVELS:
         raise ValueError(f"invalid risk level {value!r}; expected one of {LEVELS}")

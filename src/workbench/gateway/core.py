@@ -45,6 +45,7 @@ from workbench.gateway.policy import (
     PolicyEngine,
     args_digest,
     classify,
+    needs_approval_by_default,
 )
 from workbench.gateway.ratelimit import RateLimiter
 from workbench.gateway.upstream import (
@@ -250,9 +251,8 @@ class Gateway:
         ]
 
     def needs_approval(self, risk: str) -> bool:
-        """The default for a risk level: write and destructive always (ADR-030); read only if the
-        tool policy's ``require_approval`` lists it. The approval policy's rules decide per call."""
-        return risk in ("write", "destructive") or risk in self.policy_config.require_approval
+        """The default for a risk level (policy.needs_approval_by_default); rules decide per call."""
+        return needs_approval_by_default(risk, self.policy_config)
 
     def requires_approval(self, session_id: str, prefixed: str) -> bool:
         """Whether the tool needs approval by default (tool listings); calls use approval_verdict."""

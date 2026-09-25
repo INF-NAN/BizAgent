@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Coroutine
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
 from rich.console import Console
@@ -272,7 +272,7 @@ def gateway_export_risk(
     import csv
 
     from workbench.envs.catalog import build_catalog, iter_route_methods
-    from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify
+    from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify, needs_approval_by_default
 
     settings = get_settings()
     policy = PolicyConfig.load(settings.gateway.policy_file)
@@ -310,7 +310,7 @@ def gateway_export_risk(
                         c.level,
                         c.source,
                         c.reason,
-                        c.level in policy.require_approval,
+                        needs_approval_by_default(c.level, policy),
                         heuristic.level,
                     ]
                 )
@@ -322,6 +322,101 @@ def gateway_export_risk(
         f"POST/PUT/PATCH/DELETE tools graded read: {heuristic_read_writes} by name alone, "
         f"{final_read_writes} with the HTTP-method floor"
     )
+
+
+policy_app = typer.Typer(help="Approval policy (ADR-030).", no_args_is_help=True)
+gateway_app.add_typer(policy_app, name="policy")
+
+POLICY_MEANS = {
+    "auto_approve": "the gateway approves it on the policy's behalf: approver policy:{rule}, no preview, the "
+    "token is bound to preview_unavailable, and the real change is still measured and audited (D32)",
+    "require_human": "a person approves it on the approval card{after}",
+    "deny": "refused; nobody can approve it",
+    "allow": "allowed without approval",
+}
+
+
+@policy_app.command("test")
+def gateway_policy_test(
+    tool: str = typer.Option(..., "--tool", help="tool name, or <scenario>__<tool>"),
+    arguments: str = typer.Option("{}", "--args", help="call arguments as a JSON object"),
+    scenario: str | None = typer.Option(None, "--scenario", help="needed unless --tool is prefixed"),
+    risk: str | None = typer.Option(None, "--risk", help="read | write | destructive (default: classify)"),
+    policy_file: Path | None = typer.Option(None, "--policy", help="default: approval.policy_file"),
+    dataset_dir: Path | None = typer.Option(None, "--dataset-dir", help="catalog used to classify"),
+) -> None:
+    """Show which approval rule a call would hit and the decision, without running anything.
+
+    Every rule is listed in order with why it matched or not. The risk level comes from --risk or
+    from classifying the tool offline like `gateway export-risk` (name + route HTTP method; a live
+    session also reads the tool description).
+    """
+    import json
+
+    from workbench.envs.catalog import load_route_methods
+    from workbench.gateway.approval_policy import ApprovalPolicy, ApprovalPolicyError
+    from workbench.gateway.policy import LEVELS, PolicyConfig, classify, needs_approval_by_default
+
+    def fail(message: str) -> NoReturn:
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=2)
+
+    settings = get_settings()
+    file = policy_file or settings.approval.policy_file
+    try:
+        policy = ApprovalPolicy.load(file) if file is not None else ApprovalPolicy.empty()
+    except ApprovalPolicyError as exc:
+        fail(str(exc))
+    try:
+        args = json.loads(arguments)
+    except json.JSONDecodeError as exc:
+        fail(f"--args is not valid JSON: {exc}")
+    if not isinstance(args, dict):
+        fail("--args must be a JSON object")
+    if "__" in tool:
+        prefix, tool = tool.split("__", 1)
+        if scenario is not None and scenario != prefix:
+            fail(f"--tool names scenario {prefix} but --scenario is {scenario}")
+        scenario = prefix
+    if scenario is None:
+        fail("give --scenario, or a prefixed --tool <scenario>__<tool>")
+    tool_policy = PolicyConfig.load(settings.gateway.policy_file)
+    if risk is not None:
+        if risk not in LEVELS:
+            fail(f"--risk must be one of {', '.join(LEVELS)}")
+        level, how = risk, "given with --risk"
+    else:
+        directory = dataset_dir or settings.env.dataset_dir
+        methods = load_route_methods(directory, scenario)
+        if tool not in methods:
+            fail(f"{tool} is not a tool of scenario {scenario} in {directory}; pass --risk to test anyway")
+        c = classify(tool, "", tool_policy, scenario, http_method=methods[tool])
+        level, how = c.level, f"{c.source}: {c.reason}"
+    verdict = policy.evaluate(
+        scenario=scenario,
+        tool=tool,
+        risk=level,
+        arguments=args,
+        needs_approval=needs_approval_by_default(level, tool_policy),
+    )
+    console.print(f"policy: {file if file is not None else '(none)'} ({len(policy.rules)} rules)")
+    console.print(f"call: {scenario}__{tool} {json.dumps(args, ensure_ascii=False)}")
+    console.print(f"risk: {level} ({how})")
+    table = Table("#", "rule", "result", "why")
+    for i, check in enumerate(verdict.checks, 1):
+        result = "match" if check.matched else ("skipped" if "skipped:" in check.reason else "no")
+        table.add_row(str(i), check.rule, result, check.reason)
+    if verdict.checks:
+        console.print(table)
+    decided = f"rule {verdict.rule}" if verdict.rule else "default"
+    console.print(f"decision: [bold]{verdict.decision}[/bold] ({decided}) - {verdict.reason}")
+    if verdict.guard:
+        console.print(f"[yellow]guard: {verdict.guard}[/yellow]")
+    means = POLICY_MEANS[verdict.decision]
+    if verdict.decision == "auto_approve" and not verdict.needs_token:
+        means = "allowed without approval; the rule is recorded in the audit"
+    after = " (no preview: a read changes nothing)" if level == "read" else ", after a preview (ADR-029)"
+    console.print(f"means: {means.format(rule=verdict.rule, after=after)}")
 
 
 @serve_app.command("vllm-cmd")
