@@ -3,9 +3,9 @@
 
 Builds the compose stack, starts it WITHOUT the gpu profile, drives the mock demo over the HTTP
 API (query -> write -> preview + approval -> done), prints image sizes and the cold-start time,
-and stops the stack. The approval request must carry the preview diff (a shadow environment in
-the env-manager container, ADR-029) and the approved write must match it. Standard library only,
-so it runs on a bare CI runner.
+and stops the stack. The approval request must carry the approval policy's decision (ADR-030) and
+the preview diff (a shadow environment in the env-manager container, ADR-029), and the approved
+write must match it. Standard library only, so it runs on a bare CI runner.
 
 The stack needs no edits for this: the image already contains tests/fixtures, compose mounts
 ./data and reads an optional ./.env. The script copies the hand-written mini dataset to
@@ -116,6 +116,11 @@ def api_flow(base: str) -> list[str]:
     calls = ", ".join(f"{e['tool']} -> {e['status']}" for e in reads)
     out.append(f"query: {calls}")
     out.append(f"write paused for approval: {last.get('tool')} (risk {last.get('risk')})")
+    # the shipped approval policy has no rule for the mini demo call: the default sends it to a person
+    policy = last.get("policy") or {}
+    if (policy.get("decision"), policy.get("rule")) != ("require_human", None):
+        raise SmokeError(f"expected the default approval decision (require_human, no rule), got {policy}")
+    out.append(f"approval policy (ADR-030): {policy.get('reason')}")
     # the approval card carries the preview diff: the rows the call will change (ADR-029)
     preview = last.get("preview") or {}
     added = (((preview.get("changes") or {}).get("tables") or {}).get("cart_items") or {}).get("added") or []

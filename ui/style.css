@@ -67,4 +67,6 @@ table { width: 100%; border-collapse: collapse; } td, th { text-align: left; pad
 .msg.step.warn { color: var(--danger); }
 .timeline li.preview { border-color: var(--accent); }
 .timeline li.preview_mismatch, .timeline li.approval_refused { border-color: var(--danger); }
-
+.badge.rule { background: #5a4fcf; } .badge.rule.default { background: var(--muted); }
+.policy-line { margin: 4px 0; font-size: 13px; }
+.timeline li.approval_requested { border-color: var(--warn); }

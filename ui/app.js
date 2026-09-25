@@ -57,9 +57,15 @@ function timeline(e) {
   const li = el("li", { class: e.type }, el("span", { class: "t" }, `${t} `), el("b", {}, e.type), " ");
   if (e.type === "tool_call") {
     li.append(e.tool, " ", badge(e.status, e.status), " ", badge(e.decision === "allowed" ? "allowed" : "denied", e.decision));
-    if (e.approver) li.append(` approved by ${e.approver}`);
-    if (e.preview_check) li.append(" ", checkBadge(e.preview_check));
+    if (e.policy && e.policy.rule) li.append(" ", ruleBadge(e.policy));
+    if (e.approver) li.append(isPolicyApprover(e.approver) ? " auto-approved by the approval policy" : ` approved by ${e.approver}`);
+    // an auto-approved call has no preview by design (D32): a neutral badge, not the red 未预演 one
+    if (e.preview_check) li.append(" ", isPolicyApprover(e.approver) ? badge("empty", "no preview") : checkBadge(e.preview_check));
+    if (e.preview_check && e.preview_check.actual) li.append(el("span", { class: "muted" }, ` changed: ${e.preview_check.actual}`));
+    if (e.policy && e.policy.guard) li.append(" ", badge("mismatch", "guard"), ` ${e.policy.guard}`);
     li.append(el("pre", {}, (e.text || "").slice(0, 400)));
+  } else if (e.type === "approval_requested") {
+    li.append(e.tool, " ", e.policy && e.policy.rule ? ruleBadge(e.policy) : badge("rule default", "default rule"));
   } else if (e.type === "preview") {
     li.append(e.tool, " ", badge(e.status === "ok" ? "ok" : "unpreviewed", e.status), ` ${e.summary || ""}`);
   } else if (e.type === "preview_mismatch") {
@@ -81,8 +87,12 @@ function timeline(e) {
 function handleEvent(e) {
   timeline(e);
   if (e.type === "tool_call") {
-    const check = e.preview_check ? ` · preview check: ${e.preview_check.result}` : "";
-    chat("step", `tool ${e.tool} → ${e.status}${check}`);
+    const rule = e.policy && e.policy.rule ? ` · rule ${e.policy.rule}` : "";
+    const auto = isPolicyApprover(e.approver);
+    const check = e.preview_check && !auto ? ` · preview check: ${e.preview_check.result}` : "";
+    const changed = auto && e.preview_check && e.preview_check.actual ? ` · changed: ${e.preview_check.actual}` : "";
+    const how = auto ? " · auto-approved, no preview" : "";
+    chat(e.decision === "denied_by_rule" ? "step warn" : "step", `tool ${e.tool} → ${e.status}${rule}${how}${changed}${check}`);
   }
   if (e.type === "node" && e.node === "plan") chat("step", `plan: ${e.steps.map((s) => s.description).join(" → ")}`);
   if (e.type === "preview") chat("step", `preview in a shadow environment: ${e.status} · ${e.summary || ""}`);
@@ -94,6 +104,24 @@ function handleEvent(e) {
     chat("agent", e.final_answer || "(no answer)");
     refreshMemory();
   }
+}
+
+// ---------------------------------------------------------------- approval policy (ADR-030)
+function isPolicyApprover(approver) {
+  return typeof approver === "string" && approver.startsWith("policy:");
+}
+
+function ruleBadge(policy) {
+  return badge("rule", `rule ${policy.rule}`);
+}
+
+function policySection(p) {
+  if (!p) return [];
+  const why = p.rule ? p.reason.replace(`rule ${p.rule}`, "").replace(/^: /, "") : p.reason;
+  const out = [el("div", { class: "policy-line" }, el("b", {}, "审批策略"), " approval policy: ",
+    p.rule ? ruleBadge(p) : badge("rule default", "default"), why ? ` ${why}` : "")];
+  if (p.guard) out.push(el("div", { class: "blocked small" }, p.guard));
+  return out;
 }
 
 // ---------------------------------------------------------------- approval card + preview (ADR-029)
@@ -151,6 +179,7 @@ function showApproval(e) {
   const body = $("approval-body");
   body.replaceChildren(
     el("div", {}, "Tool: ", el("b", {}, e.tool), " ", badge(e.risk, e.risk)),
+    ...policySection(e.policy),
     el("pre", {}, JSON.stringify(e.arguments, null, 2)),
     ...previewSection(e.preview, e.risk),
   );
