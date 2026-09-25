@@ -4,12 +4,12 @@
 [![docker-smoke](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml/badge.svg?branch=main)](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml?query=branch%3Amain)
 
 > **English summary.** BizAgent Workbench is an application/engineering layer around Snowflake-Labs/agent-world-model (AWM) and Agent-One-Lab/AgentFly.
-> It runs isolated AWM MCP environments per session, puts every tool call behind a deny-first MCP gateway with one-time approval tokens and audit logs, and drives them with a LangGraph agent, an HTTP/SSE API and a small web UI.
+> It runs isolated AWM MCP environments per session, puts every tool call behind a deny-first MCP gateway (write calls are first previewed in a throwaway shadow environment, then approved with one-time tokens and audited), and drives them with a LangGraph agent, an HTTP/SSE API and a small web UI.
 > It also orchestrates AWM's synthesis pipeline (dry-run by default) and a smoke-only training launcher in a separate environment.
 > Everything runs on CPU with a scripted mock LLM; GPU serving and training come as scripts plus a step-by-step runbook, still marked UNVERIFIED-LOCAL.
 > This repository produces no model performance numbers: paper numbers live only in `results/registry.yaml` (checked against arXiv 2602.10090 v3), and the application layer has never been benchmarked.
 
-- **本仓库做了什么**：把 AWM 的合成环境组织成可部署、可审计、可演示的企业 MCP 智能体工作台——每会话隔离的环境、deny-first 的 MCP 网关（一次性审批令牌、限流、审计）、LangGraph 智能体、HTTP/SSE API 与 Web UI，外加合成编排与 smoke 训练启动器。
+- **本仓库做了什么**：把 AWM 的合成环境组织成可部署、可审计、可演示的企业 MCP 智能体工作台——每会话隔离的环境、deny-first 的 MCP 网关（审批前在影子环境预演、一次性审批令牌、限流、审计）、LangGraph 智能体、HTTP/SSE API 与 Web UI，外加合成编排与 smoke 训练启动器。
 - **上游提供了什么**：AWM 提供环境建库、MCP server 与合成 CLI，AgentWorldModel-1K 提供官方场景，Arctic-AWM 提供模型，AgentFly 与 veRL 提供训练框架。
 - **边界**：只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"，不产生模型性能数字；上游只以固定 SHA 的 submodule 引用、从未修改，文件级边界与许可证见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
@@ -35,11 +35,12 @@ flowchart LR
   AG --> GW["MCP 网关<br/>deny-first · 审批令牌 · 限流 · 审计"]
   GW --> ENV["AWM MCP server<br/>每会话独立 SQLite"]
   API --> MGR["env-manager"] --> ENV
+  GW -.->|审批前预演| MGR --> SH["影子环境<br/>会话 DB 的副本 · 用完即回收"]
   SYN["合成编排（离线）"] -.-> MGR
   TR["smoke 训练启动器（独立 train 环境）"] -.-> AF["AgentFly + veRL"]
 ```
 
-分层图与"一次带审批的写操作"时序图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+分层图与"一次带审批的写操作"时序图（含审批前预演，ADR-029）见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 3 分钟快速开始（mock，CPU）
 
@@ -53,7 +54,7 @@ make test         # 单元 + 集成测试（真实 AWM 代码 + mock LLM）
 make demo-mock    # 打开 http://127.0.0.1:8080/ui/
 ```
 
-在 UI 中：Start isolated session → 发送 "Add the best wireless noise cancelling headphones under $200 to my cart" → 在审批面板点 Approve → 查看 Timeline 与 DB diff（`cart_items` 新增一行）。
+在 UI 中：Start isolated session → 发送 "Add the best wireless noise cancelling headphones under $200 to my cart" → 审批卡片列出影子环境预演出的"将要改动的行"，点 Approve → 查看 Timeline 与 DB diff（`cart_items` 新增一行）。
 
 mock 的回答来自手写脚本 `tests/fixtures/trajectories/demo_query_write_approve.jsonl`，**不是模型输出**。
 

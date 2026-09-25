@@ -250,6 +250,53 @@ mini_e_commerce,remove_cart_item,DELETE,destructive,heuristic,verb 'remove' => d
 - `src/workbench/gateway/server.py`：低层 MCP Server，工具名为 `<scenario>__<tool>`；
 - 测试：`tests/unit/test_gateway_*.py`、`tests/integration/test_gateway_real_awm.py`。
 
+### 4.1 审批前预演（Phase 17，ADR-029）
+
+write 与 destructive 调用进入审批之前，先在影子环境里执行一次：env-manager 用在线备份复制会话**当前**的数据库，在隔离端口起一个 AWM server，执行同一调用，算出改动后回收进程组、端口与目录。审批卡片显示"将要改动的行"；预演失败时显示原因。
+
+```bash
+make demo-mock    # UI 中发送加购请求：审批卡片出现"将要改动的行"（cart_items 新增一行）
+```
+
+配置在 `configs/app.yaml` 的 `approval` 一节（仓库主人的决定 D29）：
+
+- `require_preview`：按风险级别设置，默认 `{write: false, destructive: true}`。
+  - 为 true 而预演失败时，不签发令牌，只能拒绝（UI 禁用 Approve，API 返回 409）；
+  - 为 false 时仍可批准，令牌绑定 `preview_unavailable`，审计中记录，UI 醒目标出"未预演"。
+- `preview_timeout_s`：整个预演的超时，默认 30 秒。取值依据是实测：官方 `e_commerce_33` 最慢一次总耗时的 5 倍。
+
+复现预演失败的界面：
+
+```bash
+WORKBENCH_APPROVAL__PREVIEW_TIMEOUT_S=0.2 WORKBENCH_APPROVAL__REQUIRE_PREVIEW='{"write": true, "destructive": true}' make demo-mock
+```
+
+预演耗时是工程数字，用脚本实测：
+
+```bash
+uv run python scripts/measure_preview.py                                   # 迷你夹具，10 次
+uv run python scripts/measure_preview.py --dataset-dir data/awm1k --scenario e_commerce_33 \
+  --args '{"product_offer_id": 1, "quantity": 1}'                           # 官方场景（需 make data）
+```
+
+本机结果见 `docs/verification/logs/2026-09-25-preview-timing.log`：总耗时中位数迷你夹具 3678 ms、官方场景 4316 ms，几乎都花在启动影子 server 上。
+
+批准后，网关在真实调用前后各取一次改动，与令牌绑定的预演做结构比对：比对改动的表、主键和改动的列名；时间列只记录、不比对。结果写入审计的 `preview_check`，取值为 `match`、`preview_mismatch`、`preview_unavailable` 或 `check_failed`；不一致时 UI 标出 `preview_mismatch`。识别时间列与生成主键的依据见 RECON §10 "Phase 17"。
+
+外部 MCP 客户端的做法：先 `POST /admin/previews` 取得预演，再把它的 `preview_id` 交给 `POST /admin/approvals`；也可以不给，由后者先预演再签发。`workbench gateway serve` 只有在配置了 `env.manager_url` 时才能预演。
+
+阅读：
+
+- `src/workbench/envs/manager.py` 的 `preview` / `checkpoint` / `changes_since`；
+- `src/workbench/envs/changes.py`（行级改动与结构比对）；
+- `src/workbench/gateway/core.py` 的 `preview`、`issue_approval`、`_check_preview`；
+- `src/workbench/agent/nodes/preview.py`。
+
+测试：
+
+- 单元：`tests/unit/test_changes.py`、`tests/unit/test_gateway_preview.py`；
+- 集成：`tests/integration/test_preview_real_awm.py`（真实 AWM server：预演与真实 diff 一致、destructive、失败路径、回收后无残留）。
+
 ## 5. 智能体：LangGraph 状态机与 UI
 
 目标：跑通"查询 → 审批 → 写入 → 回答 → DB diff"的完整链路。
