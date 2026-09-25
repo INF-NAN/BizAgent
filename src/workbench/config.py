@@ -82,7 +82,9 @@ class ApprovalSettings(BaseModel):
     # preview leaves only a rejection and no token is issued. false: the call can still be approved;
     # the token is bound to "preview_unavailable", the audit records it and the UI shows 未预演.
     require_preview: dict[ApprovalRisk, bool] = Field(default_factory=_require_preview_default)
-    # The whole preview: copy the DB, start the shadow server, call, diff, reclaim (ADR-029).
+    # The whole preview: copy the DB, start the shadow server, call, diff, reclaim. 30 s is five times
+    # the slowest total measured on the official e_commerce_33 scenario (scripts/measure_preview.py,
+    # docs/verification/logs/2026-09-25-preview-timing.log; ADR-029), rounded up to whole 5 s.
     preview_timeout_s: float = Field(default=30.0, gt=0)
     # Rows per table and kind shown on the approval card; the comparison always uses every key.
     preview_max_rows: int = Field(default=20, ge=1)

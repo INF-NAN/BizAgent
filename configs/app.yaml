@@ -11,11 +11,20 @@ env:
   start_timeout_s: 60
   health_timeout_s: 10
   idle_timeout_s: 600
+  max_previews: 2                # shadow environments for approval previews running at once (ADR-029)
 gateway:
   policy_file: configs/tool_policy.yaml
   audit_path: data/audit/gateway.jsonl
   upstream_timeout_s: 30
   port: 8081
+approval:
+  # Before a write/destructive call is approved, it runs once in a shadow environment started from a
+  # copy of the session's current DB; the approval card shows the rows it will change (ADR-029).
+  # require_preview true: a failed preview leaves only a rejection. false: approvable, the token is
+  # bound to "preview_unavailable" and the UI shows 未预演 (owner decision D29).
+  require_preview: {write: false, destructive: true}
+  preview_timeout_s: 30          # 5x the slowest measured total on official e_commerce_33, rounded up
+  preview_max_rows: 20           # rows per table shown on the card; the comparison uses every key
 llm:
   backend: mock_replay           # mock_replay | vllm | openai_compat
   model: Snowflake/Arctic-AWM-4B
