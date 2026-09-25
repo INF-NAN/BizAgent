@@ -14,11 +14,15 @@
 - **边界**：只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"，不产生模型性能数字；上游只以固定 SHA 的 submodule 引用、从未修改，文件级边界与许可证见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
 <p>
-  <img src="docs/assets/demo-approval.png" width="400" align="top" alt="审批卡片：写操作 add_item_to_cart 等待人工批准">
+  <img src="docs/assets/demo-approval.png" width="400" align="top" alt="审批卡片：写操作 add_item_to_cart 的预演结果（将要新增的 cart_items 行）">
   <img src="docs/assets/demo-diff.png" width="400" align="top" alt="批准后的 DB diff：cart_items 由 1 行变为 2 行">
 </p>
 
-*mock 演示截图*：左为写操作 `add_item_to_cart` 的审批卡片，右为批准后与初始数据库比较的 DB diff（`cart_items` 新增一行）。回答来自手写的 mock 脚本，不是模型输出；截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成。
+*mock 演示截图*：左为写操作 `add_item_to_cart` 的审批卡片，附带影子环境预演出的"将要改动的行"；右为批准后与初始数据库比较的 DB diff（`cart_items` 新增一行）。回答来自手写的 mock 脚本，不是模型输出；截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成。
+
+<img src="docs/assets/demo-overview.png" alt="整页：左侧会话与工具风险，中间对话与审批卡片（含预演 diff），右侧时间线">
+
+*mock 演示截图（整页）*：对话、时间线与带预演 diff 的审批卡片同屏；时间线中的 `preview` 一项即影子环境预演。
 
 > ⚠️ **上游许可证声明**：Snowflake-Labs/agent-world-model **未声明任何许可证**。本仓库只以 git submodule 指针引用它，不包含其代码副本，也不修改其代码；本仓库**不对 AWM 代码授予任何权利**。使用前请自行判断（详见 [docs/UPSTREAM.md](docs/UPSTREAM.md)、ADR-003）。
 

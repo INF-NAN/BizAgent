@@ -48,3 +48,23 @@ table { width: 100%; border-collapse: collapse; } td, th { text-align: left; pad
 .timeline .t { color: var(--muted); } code, pre { font-family: ui-monospace, monospace; font-size: 12px; }
 .memory { padding-left: 16px; font-size: 12px; }
 .viewer-step { border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin: 6px 0; }
+/* approval previews (ADR-029) */
+.preview-box { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.preview-box.unpreviewed { border: 2px solid var(--danger); }
+.preview-head { margin: 2px 0 6px; }
+.preview-table { margin: 6px 0; }
+.rows td { font-family: ui-monospace, monospace; font-size: 12px; vertical-align: top; }
+.rows td:first-child { width: 14px; font-weight: 700; }
+.rows td.key { white-space: nowrap; color: var(--muted); }
+.rows tr.added td:first-child { color: var(--ok); }
+.rows tr.removed td:first-child { color: var(--danger); }
+.rows tr.changed td:first-child { color: var(--warn); }
+.volatile { color: var(--muted); font-style: italic; }
+.badge.match { background: var(--ok); }
+.badge.mismatch, .badge.unpreviewed { background: var(--danger); }
+.badge.big { font-size: 13px; padding: 3px 10px; }
+.blocked { color: var(--danger); font-weight: 600; }
+.msg.step.warn { color: var(--danger); }
+.timeline li.preview { border-color: var(--accent); }
+.timeline li.preview_mismatch, .timeline li.approval_refused { border-color: var(--danger); }
+
