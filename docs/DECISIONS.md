@@ -669,3 +669,65 @@
   - `tests/unit/test_results.py` 新增两个测试：同一目录下未列出的文件仍被扫描；豁免清单恰好是这两个文件，且文件存在。
 - **代价**：任务书中的数字不再受守卫检查。它们只是转录，不是本仓库的结论；论文数字的唯一来源仍是 registry。
 - **补充（2026-09-25，D28）**：仓库主人要求把本轮任务原文存为 `docs/process/TASK_v3.md` 并同样豁免；`skip_files` 与固定它的单测随之改为三个文件。
+
+## ADR-029 写操作审批前在影子环境预演（approval preview）
+
+- **背景**：
+  - Phase 17（`docs/process/TASK_v3.md`，仓库主人的决定 D29）要求：write 与 destructive 调用进入审批之前，先在影子环境里执行同一调用，把"将要改动的行"附在审批请求上；审批令牌绑定（工具、参数哈希、预演 diff 哈希）；批准并真实执行后，比对实际改动与预演，不一致时记 `preview_mismatch`。
+  - 已有的能力：
+    - env-manager 以独立进程组、租用端口、白名单环境变量启动 AWM server（ADR-004、ADR-019）；
+    - `envs/snapshot` 用 SQLite 在线备份做快照，`diff` 只列出变化的主键；
+    - 网关的一次性 HMAC 令牌绑定（会话、工具、参数摘要）；审计为 JSONL。
+  - 约束：影子环境绝不触碰真实数据库；预演有超时；不修改上游。LangGraph 恢复被 interrupt 暂停的节点时会从头重跑该节点（`docs/RECON.md` §10 "Phase 5" 的实测）。
+- **可选方案**：
+  1. 在 approve 节点里、interrupt 之前预演：恢复时整个节点重跑，预演会执行两次，否决；
+  2. 在会话自己的 server 上执行后回滚：AWM 生成的代码自己提交事务，没有回滚的入口，而且会写真实数据库，否决；
+  3. 由 env-manager 在隔离端口起一个影子环境，从会话当前数据库的副本启动，执行同一调用后回收（选定）。
+- **决定**：
+  - **影子环境**（`EnvManager.preview`）：
+    - 用 SQLite 在线备份复制会话当前的 `work.db`（只读，会话的 server 照常运行）；
+    - 用与会话环境相同的启动路径起 AWM server：独立进程组、端口池中的端口、白名单环境变量，`--db_path`、`--temp_server_path`、`--output_dir` 全部指向 `<run_dir>/previews/<id>/`（AWM 只写这些位置，见 RECON）；
+    - 经 MCP 执行同一调用，用 `workbench.envs.changes` 计算改动；
+    - 无论成功、出错还是超时，都在 `finally` 中按进程组回收、释放端口、删除目录（回收不受取消影响）；
+    - 整个预演受 `approval.preview_timeout_s` 限制；不占 `max_envs` 名额，并发数受 `env.max_previews` 限制；
+    - 经 `EnvService` 同时提供本地实现与 HTTP 实现（新增 `/envs/{sid}/preview`、`/checkpoints`），所以 docker compose 的 env-manager 容器中同样可用。
+  - **行级改动与结构比对**（`workbench.envs.changes`）：
+    - 按 `snapshot.diff` 的方式对行加键，记录新增、删除、修改的行，以及每个修改行改动的列名（展示时每类最多 `preview_max_rows` 行，比对时使用全部键）；
+    - 只比对结构：改动的表，新增、删除、修改的主键，改动的列名（D29）；
+    - 时间类列（声明类型含 DATE/TIME、时间默认值、`*_at`/`*_time`/`*_date` 等列名）只记录、不比对；主键不是 INTEGER rowid 别名的表，新增行只比对行数；识别依据与官方数据的统计见 RECON "Phase 17"；
+    - 每次比对都写明忽略了哪些列（`ignored_columns`）、哪些表按行数比对（`count_only`）。
+  - **网关**：
+    - `Gateway.preview` 生成预演记录，用审批密钥签名（覆盖 id、会话、工具、参数摘要、状态、digest；digest 是改动的 sha256），并写一条审计；
+    - `issue_approval` 只信任本网关为同一调用签发、且 digest 与内容一致的记录；令牌写入 `p`（预演 digest，或 `preview_unavailable`）与 `pid`；
+    - `approval.require_preview` 按风险级别配置，默认 `{write: false, destructive: true}`：为 true 而预演未成功时不签发令牌，只能拒绝；为 false 时令牌绑定 `preview_unavailable`；
+    - 经批准的调用前后各取一次改动（`checkpoint` / `changes_since`），与令牌绑定的预演比对，结果 `preview_check` 写入审计与调用结果：`match`、`preview_mismatch`（附差异与忽略的列）、`preview_unavailable` 或 `check_failed`；
+    - 管理端新增 `/admin/previews`；`/admin/approvals` 没有给出 `preview_id` 时，先在本请求中预演。
+  - **智能体与 API**：
+    - act 与 approve 之间新增 preview 节点，记录保存在 checkpoint 中，approve 节点重跑时不会再预演；
+    - 批准时把记录交给 `issue_approval`；必需的预演失败时改为拒绝并发出 `approval_refused`；API 在恢复图之前就返回 409。
+  - **UI**：审批卡片显示"将要改动的行"或醒目的"未预演"与原因；必需的预演失败时禁用 Approve；时间线与对话标出 `preview_mismatch`。
+  - **超时**：
+    - `scripts/measure_preview.py` 在开发容器中实测（4 核 CPU，每项 10 次，日志 `docs/verification/logs/2026-09-25-preview-timing.log`）：
+      - 迷你夹具：总耗时中位 3678 ms、最大 3806 ms；
+      - 官方 `e_commerce_33`（39 个工具）：总耗时中位 4316 ms、最大 5977 ms；
+      - 其中启动影子 server 占绝大部分（官方场景中位 4169 ms），调用约 100 ms，复制、diff、回收各几到几十 ms。
+    - 超时取官方场景最慢一次总耗时的 5 倍，向上取整到 5 秒，即 30 秒。
+- **验证**：
+  - 单元测试：
+    - `test_changes.py`：6 项，含"两次执行只有时间戳不同，不判为 mismatch"；
+    - `test_gateway_preview.py`：7 项，覆盖必需与可选的预演、mismatch、令牌与参数不符时拒绝、篡改或外来的记录；
+    - `test_env_service.py` 与 `test_api.py` 各新增一项。
+  - 集成测试（真实 AWM 迷你 server）：`test_preview_real_awm.py` 5 项：
+    - 加购的预演与真实 diff 一致；
+    - destructive 预演显示将删除的行；
+    - 从会话当前数据库启动（第二次预演得到主键 3）；
+    - 超时与影子 server 启动即退出两条失败路径；
+    - 回收后没有存活的进程组成员，端口可重新绑定，也没有残留目录。
+  - 官方数据（本地运行，CI 中 skip）：`e_commerce_33` 的 `add_item_to_cart` 预演与真实执行结果为 match，忽略 `cart_items` 的 `created_at`、`updated_at`。
+  - docker-smoke 断言审批请求带预演 diff、批准后为 match（经 env-manager 容器）；`scripts/demo_ui_check.py` 在浏览器中走通并截图。
+- **代价**：
+  - 每个需要审批的调用多等一次影子 server 启动（本机实测约 4–6 秒），还要多占一个 server 进程的内存（受 `max_previews` 限制）。
+  - 生成的代码被多执行一次：写数据库以外的副作用（外部请求等）会发生两次。官方 1000 个环境的代码中没有 `requests`、`subprocess`、`os.system`，`httpx` 只出现 1 次（RECON）。
+  - 比对只看结构：时间列与生成的主键无法按值比对；如果某个 server 用随机值给 INTEGER 主键赋值，会被误报为 `preview_mismatch`（误报方向安全）。
+  - 预演记录用审批密钥验证：进程重启且没有固定 `WORKBENCH_APPROVAL_SECRET` 时，挂起中、要求预演的审批只能拒绝后重新发起。
+  - 独立运行的 `workbench gateway serve` 没有 env-manager 时无法预演，destructive 调用因此不能在这里批准（设计如此，见 LIMITATIONS §6）。
