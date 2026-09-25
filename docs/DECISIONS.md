@@ -581,3 +581,49 @@
   - 只有通过 `workbench verify` 运行时才有隔离，直接运行 `awm verify` 仍会把 shell 里的 key 交给 verifier 代码。runbook 与文档都改用本命令。
   - sql 模式下，verifier 代码仍能看到代理地址和占位 key，可以经代理发起 LLM 调用。这些调用会记入 `verify_ledger.jsonl`，但本命令没有预算上限。
   - 与 ADR-019 相同，只隔离环境变量，同一用户可读的文件仍然可读。
+
+## ADR-026 训练进程只拿白名单中的环境变量（`train_env`）
+
+- **背景**：
+  - ADR-019 没有覆盖训练。`workbench train launch` 用 `subprocess.run(command)` 启动训练，没有传 `env=`，训练进程继承 workbench 的全部环境变量；preflight 的探针也是这样（修复前的 `src/workbench/train/launch.py`、`preflight.py`）。
+  - 训练进程运行第三方 ML 代码，还会把模型输出交给工具执行：smoke 配置使用 AgentFly 的 calculator 工具，它用 sympy 的 `sympify` 解析模型输出，而 `sympify` 内部使用 `eval`（sympy 1.14.0，`sympy/core/sympify.py:138-139`）。
+  - 仓库主人的决定 D13(b)、D18：执行 Phase 15 之前，训练改用白名单。
+  - 难点在于，训练栈读取的环境变量很多，白名单是否够用只能在 GPU 机器上验证。漏掉一个必需的变量，训练就会在租来的机器上失败。
+- **读源码得到的变量**（都是可选的，有默认值）：
+  - **AgentFly @1256586**：
+    - `XDG_CACHE_HOME`、`AGENT_DATA_DIR`、`AGENT_CONFIG_DIR`、`TOOL_ERROR_AS_OBSERVATION`（`agentfly/__init__.py:16-47`）；
+    - `REWARD_DECOMPOSITION`、`REWARD_DECOMPOSITION_GAMMA`（`agents/agent_base.py:155-171`）；
+    - `AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC`，只用于容器工具；
+    - 它自己设置 `TOKENIZERS_PARALLELISM` 与 `VLLM_CONFIGURE_LOGGING`。
+  - **veRL fork @001f000**（在 scratch 中只读检出后检索）：
+    - 读取 `VERL_*`（日志等级等）、`NCCL_*`、`CUDA_*`、`TORCH_*`、`CUBLAS_WORKSPACE_CONFIG`、`FLASH_ATTENTION_DETERMINISTIC`、`TOKENIZERS_PARALLELISM`、`OMP_NUM_THREADS`；
+    - `RANK`、`WORLD_SIZE`、`MASTER_ADDR` 等分布式变量由 Ray 与 veRL 为 worker 自己设置；
+    - 跟踪器的变量（`WANDB_*`、`MLFLOW_*`、`SWANLAB_API_KEY`、`VOLC_SECRET_ACCESS_KEY`）只在启用对应 logger 时读取，而 smoke 配置只用 console logger。
+  - **其它**：vLLM、Ray、Hugging Face、Triton、PyTorch 各有一族以固定前缀命名的设置。本 ADR 按前缀放行，没有逐个核对这些库的源码。NVIDIA 的容器镜像通常用 `LD_LIBRARY_PATH` 指向驱动库。
+- **可选方案**：
+  1. 只按名称放行：训练栈的变量太多，漏掉一个就会在 GPU 机器上失败；
+  2. 按名称加前缀放行，前缀之内仍然拦下名字像凭据的变量；另给仓库主人一个显式放行的配置；dry-run 显示放行和拦下的变量名。
+- **决定**：选方案 2。实现在 `src/workbench/subprocess_env.py` 的 `train_env`、`src/workbench/train/launch.py`、`src/workbench/train/preflight.py`、`src/workbench/config.py`、`src/workbench/cli.py` 与 `configs/app.yaml`。
+  - **放行的变量**：
+    - ADR-019 的 `BASE_VARS`；
+    - `NETWORK_VARS`：下载模型可能需要代理与 CA 设置；
+    - `TRAIN_VARS`：`HOME` 等缓存位置、`LD_LIBRARY_PATH`、`CC`/`CXX`、线程数与确定性开关、uv 与 AgentFly 的设置；
+    - `TRAIN_PREFIXES` 之下、名字不含 KEY、TOKEN、SECRET、PASSW、CREDENTIAL、AUTH 的变量。前缀有 `CUDA_`、`NVIDIA_`、`NCCL_`、`GLOO_`、`TORCH_`、`PYTORCH_`、`TORCHINDUCTOR_`、`TRITON_`、`VLLM_`、`RAY_`、`VERL_`、`HF_`、`HUGGINGFACE_`、`TRANSFORMERS_`、`AGENTFLY_`。
+  - **一律不传的**：其它所有变量，包括 `DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`HF_TOKEN`、跟踪器的 key，以及云与 git 的凭据。
+  - **显式放行**：`train.env_passthrough` 按名称额外放行（名字像凭据的也可以），例如某台机器确实需要 `HF_TOKEN`。默认为空。
+  - **同一个环境**：`launch` 与 preflight 的所有探针用同一个环境，所以 preflight 检查的就是训练会看到的环境。两者在没有显式传入环境时，也默认使用 `train_env()`。
+  - **可见性**：dry-run 的输出与运行目录中的 `env_names.json` 列出放行和拦下的变量名，不含变量的值。
+- **验证**（`tests/unit/test_train_env.py`，6 项，真实子进程）：
+  - **对照组**：把完整环境交给 `launch`（修复前的行为），探针看到全部 12 个植入的凭据。
+  - **白名单**：
+    - 探针看不到任何植入的凭据；
+    - GPU 机器可能需要的 17 个变量都在，例如 `HF_ENDPOINT`、`LD_LIBRARY_PATH`、`CUDA_VISIBLE_DEVICES`、`NCCL_P2P_DISABLE`、`VLLM_USE_V1`、`RAY_TMPDIR`、`VERL_LOGGING_LEVEL`；
+    - 前缀之下名字像凭据的变量（`HF_TOKEN`、`VLLM_API_KEY`、`RAY_AUTH_TOKEN`）被拦下。
+  - **其它**：
+    - `env_names.json` 只含变量名；
+    - 显式放行能加入 `HF_TOKEN`；
+    - preflight 的探针看到的与训练相同。
+- **代价**：
+  - 按前缀放行比只按名称放行宽：前缀之内名字不像凭据的变量都会传下去。
+  - 白名单是否够用，只能在 GPU 机器上验证（Phase 15B，UNVERIFIED-LOCAL）。缺了变量时，训练会在那台机器上报错，处理办法是把它加到 `train.env_passthrough`。
+  - 与 ADR-019 相同，只隔离环境变量。`HOME` 放行后，训练进程仍能读到该用户可读的文件，例如 `huggingface-cli login` 保存的 token 文件或 `~/.netrc`。

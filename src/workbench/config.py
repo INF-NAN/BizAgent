@@ -127,6 +127,9 @@ class TrainSettings(BaseModel):
     project_dir: Path = Path("train")
     smoke_config: Path = Path("configs/train/smoke.yaml")
     out_dir: Path = Path("data/train_runs")
+    # Variable names passed to the train env on top of its allowlist (ADR-026), e.g. a name the
+    # allowlist drops that a machine turns out to need. Values are never logged.
+    env_passthrough: list[str] = Field(default_factory=list)
 
 
 class Settings(BaseSettings):

@@ -48,3 +48,11 @@ synth:
   # more such requests than this fail the step, and the same command resumes it; 1..this many mark
   # it done_with_failures (listed in the output and in validation.json), never done.
   max_failed_requests: 0
+
+train:
+  # `workbench train preflight` and `launch` give the train env an allowlisted environment
+  # (ADR-026): the base variables, proxies, and what CUDA/NCCL/PyTorch/vLLM/Ray/veRL/Hugging Face
+  # read, never a credential-like name (HF_TOKEN, WANDB_API_KEY, ...). List extra variable NAMES
+  # here, or as WORKBENCH_TRAIN__ENV_PASSTHROUGH='["HF_TOKEN"]', if a machine needs one; the
+  # dry run (`workbench train launch`) shows which names are passed and withheld.
+  env_passthrough: []

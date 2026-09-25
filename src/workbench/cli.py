@@ -504,12 +504,16 @@ def synth_validate(run_dir: Path) -> None:
 def train_preflight(profile: Path | None = typer.Option(None, "--profile")) -> None:
     """Check GPU, CUDA/torch/vLLM/veRL, config keys and data for the smoke profile."""
     from workbench.doctor import exit_code
-    from workbench.train.preflight import run_preflight
+    from workbench.subprocess_env import train_env
+    from workbench.train.preflight import env_runner, run_preflight
     from workbench.train.profile import TrainProfile
 
     s = get_settings()
     results = run_preflight(
-        TrainProfile.load(profile or s.train.smoke_config), s.upstream.agentfly_dir, s.train.project_dir
+        TrainProfile.load(profile or s.train.smoke_config),
+        s.upstream.agentfly_dir,
+        s.train.project_dir,
+        run=env_runner(train_env(passthrough=s.train.env_passthrough)),  # what launch will see
     )
     table = Table(title="train preflight (smoke)")
     for col in ("check", "status", "detail"):
@@ -526,15 +530,18 @@ def train_launch(
     execute: bool = typer.Option(False, "--execute", help="run it (needs a GPU); default prints the plan"),
 ) -> None:
     """Launch the SMOKE profile in the separate train env (subprocess). Output is marked NO_RESULTS."""
+    from workbench.subprocess_env import train_env
     from workbench.train.launch import LaunchError, launch
-    from workbench.train.preflight import run_preflight
+    from workbench.train.preflight import env_runner, run_preflight
     from workbench.train.profile import TrainProfile
 
     s = get_settings()
     prof = TrainProfile.load(profile or s.train.smoke_config)
-    checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir)
+    env = train_env(passthrough=s.train.env_passthrough)  # ADR-026
+    checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir, run=env_runner(env))
     try:
-        console.print_json(data=launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute))
+        plan = launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute, env=env)
+        console.print_json(data=plan)
     except LaunchError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc

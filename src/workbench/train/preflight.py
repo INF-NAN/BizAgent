@@ -1,20 +1,23 @@
 """`workbench train preflight`: GPU, CUDA/torch/vLLM/veRL versions, data paths, config keys.
 
 All probes of the train env run as subprocesses (`uv run --project train --no-sync ...`) and
-are injectable for tests (GPU info is mocked in CI: there is no GPU, rule R10).
+are injectable for tests (GPU info is mocked in CI: there is no GPU, rule R10). The CLI runs them
+with the environment training will get (``env_runner(train_env())``, ADR-026), so preflight
+checks what `launch` will see.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from workbench.doctor import CheckResult, Status
+from workbench.subprocess_env import train_env
 from workbench.train.profile import TrainProfile
 
 Runner = Callable[[list[str]], tuple[int, str]]
@@ -26,12 +29,24 @@ PROBE = (
 )
 
 
-def default_runner(cmd: list[str]) -> tuple[int, str]:
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-        return 127, str(exc)
-    return out.returncode, out.stdout + out.stderr
+def env_runner(env: Mapping[str, str] | None = None) -> Runner:
+    """A runner whose probes get ``env`` (None: this process's environment)."""
+
+    def run(cmd: list[str]) -> tuple[int, str]:
+        try:
+            out = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+                env=None if env is None else dict(env),
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            return 127, str(exc)
+        return out.returncode, out.stdout + out.stderr
+
+    return run
 
 
 def check_gpu(run: Runner, min_free_mb: int = 12_000) -> CheckResult:
@@ -172,8 +187,10 @@ def verl_config_files(agentfly_dir: Path) -> list[Path]:
 
 
 def run_preflight(
-    profile: TrainProfile, agentfly_dir: Path, train_project: Path, run: Runner = default_runner
+    profile: TrainProfile, agentfly_dir: Path, train_project: Path, run: Runner | None = None
 ) -> list[CheckResult]:
+    """All checks; the probes run in ``train_env()`` unless ``run`` says otherwise (ADR-026)."""
+    run = run or env_runner(train_env())
     keys = [
         *profile.overrides,
         "data.train_files",
