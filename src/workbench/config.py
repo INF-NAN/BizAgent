@@ -52,6 +52,9 @@ class EnvSettings(BaseModel):
     manager_url: str | None = None
     manager_host: str = "127.0.0.1"
     manager_port: int = 8090
+    # Shadow environments for approval previews (ADR-029) run beside the sessions and do not take a
+    # max_envs slot; at most this many run at once, further previews wait (within their timeout).
+    max_previews: int = Field(default=2, ge=1)
 
 
 class GatewaySettings(BaseModel):
@@ -65,6 +68,24 @@ class GatewaySettings(BaseModel):
     rate_capacity: float = 10.0
     rate_refill_per_s: float = 2.0
     summary_max_chars: int = 300
+
+
+ApprovalRisk = Literal["write", "destructive"]
+
+
+def _require_preview_default() -> dict[ApprovalRisk, bool]:
+    return {"write": False, "destructive": True}
+
+
+class ApprovalSettings(BaseModel):
+    # Risk levels whose approval needs a successful preview (owner decision D29). true: a failed
+    # preview leaves only a rejection and no token is issued. false: the call can still be approved;
+    # the token is bound to "preview_unavailable", the audit records it and the UI shows 未预演.
+    require_preview: dict[ApprovalRisk, bool] = Field(default_factory=_require_preview_default)
+    # The whole preview: copy the DB, start the shadow server, call, diff, reclaim (ADR-029).
+    preview_timeout_s: float = Field(default=30.0, gt=0)
+    # Rows per table and kind shown on the approval card; the comparison always uses every key.
+    preview_max_rows: int = Field(default=20, ge=1)
 
 
 class LLMSettings(BaseModel):
@@ -144,6 +165,7 @@ class Settings(BaseSettings):
     upstream: UpstreamSettings = Field(default_factory=UpstreamSettings)
     env: EnvSettings = Field(default_factory=EnvSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    approval: ApprovalSettings = Field(default_factory=ApprovalSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)

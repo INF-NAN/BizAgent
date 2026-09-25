@@ -37,6 +37,47 @@ async def test_remote_client_against_http_control_plane(tmp_path: Path) -> None:
     await mgr.stop_all()
 
 
+async def test_remote_preview_and_checkpoints_over_http(tmp_path: Path) -> None:
+    """Approval previews through the env-manager's HTTP control plane (ADR-029)."""
+    import sqlite3
+    from contextlib import closing
+    from typing import Any
+
+    mgr = make(tmp_path, SLEEPER)
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_call(url: str, tool: str, arguments: dict[str, Any], timeout_s: float) -> tuple[bool, str]:
+        calls.append((tool, arguments))
+        [shadow] = (tmp_path / "runs" / "p1" / "previews").glob("*/shadow.db")
+        with closing(sqlite3.connect(shadow)) as conn:  # what the shadow server would do
+            conn.execute("INSERT INTO t VALUES (2)")
+            conn.commit()
+        return False, '{"id": 2}'
+
+    mgr._call_tool = fake_call
+    app = create_env_app(mgr.settings, manager=mgr)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://env")
+    remote = RemoteEnvService("http://env", client=client)
+    await remote.start("scn", "p1")
+    result = await remote.preview("p1", "add_t", {"n": 2}, timeout_s=10)
+    assert result["status"] == "ok" and result["call"] == {"is_error": False, "text": '{"id": 2}'}
+    assert result["changes"]["tables"]["t"]["added"] == [{"key": 2, "row": {"id": 2}}]
+    assert calls == [("add_t", {"n": 2})]
+    assert (await remote.diff("p1"))["changed"] is False  # the session's DB is untouched
+    assert not (tmp_path / "runs" / "p1" / "previews").exists()
+
+    cp = await remote.checkpoint("p1")
+    with closing(sqlite3.connect(tmp_path / "runs" / "p1" / "work.db")) as conn:  # "the real call"
+        conn.execute("INSERT INTO t VALUES (3)")
+        conn.commit()
+    measured = await remote.changes_since("p1", cp)
+    assert measured["tables"]["t"]["shape"]["added"] == [3]
+    with pytest.raises(EnvNotFoundError):  # a checkpoint is consumed once
+        await remote.changes_since("p1", cp)
+    await remote.close()
+    await mgr.stop_all()
+
+
 async def test_local_service_wraps_manager(tmp_path: Path) -> None:
     svc = LocalEnvService(make(tmp_path, SLEEPER))
     info = await svc.start("scn", "l1")

@@ -8,6 +8,10 @@ server orphaned (observed in Phase 2, see docs/RECON.md §9), (4) polls an `awm 
 equivalent health check with a deadline, and (5) supervises the process afterwards
 (crash -> ``unhealthy``, idle -> reaped, main-process exit -> everything killed).
 Concurrency is bounded by a semaphore; callers beyond the limit queue up to a timeout.
+
+``preview`` runs one tool call on a shadow copy of a session's current DB, on a leased port
+and in its own process group, and reports the changes; ``checkpoint``/``changes_since`` measure
+what a real call changed (approval previews, ADR-029).
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import atexit
 import contextlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -29,6 +34,7 @@ from typing import Any, Literal, Protocol
 
 from workbench.config import EnvSettings
 from workbench.envs import awm_adapter
+from workbench.envs import changes as chg
 from workbench.envs import snapshot as snap
 from workbench.envs.catalog import load_route_methods
 from workbench.envs.health import HealthResult, check_mcp
@@ -40,6 +46,8 @@ HealthFn = Callable[[str, float], Awaitable[HealthResult]]
 DbBuilder = Callable[[Path, str, Path], Path]
 CommandBuilder = Callable[..., list[str]]
 MethodsLoader = Callable[[Path, str], dict[str, str]]
+# (url, tool, arguments, timeout_s) -> (is_error, text), like gateway.upstream.McpUpstream.call_tool
+ToolCaller = Callable[[str, str, dict[str, Any], float], Awaitable[tuple[bool, str]]]
 
 
 class EnvError(RuntimeError):
@@ -131,6 +139,25 @@ def _kill_group(proc: subprocess.Popen[bytes], grace_s: float) -> None:
         proc.wait(timeout=grace_s)
 
 
+@dataclass
+class _Shadow:
+    """What a preview has to reclaim: its directory, and the port and process once started."""
+
+    dir: Path
+    port: int | None = None
+    process: subprocess.Popen[bytes] | None = None
+
+
+def _ms(since: float) -> float:
+    return round((time.perf_counter() - since) * 1000, 1)
+
+
+def _default_tool_caller() -> ToolCaller:
+    from workbench.gateway.upstream import McpUpstream  # the same MCP client the gateway uses
+
+    return McpUpstream().call_tool
+
+
 def tail_file(path: Path, lines: int) -> str:
     if not path.exists():
         return ""
@@ -148,6 +175,7 @@ class EnvManager:
         db_builder: DbBuilder | None = None,
         command_builder: CommandBuilder | None = None,
         methods_loader: MethodsLoader | None = None,
+        tool_caller: ToolCaller | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
@@ -157,9 +185,11 @@ class EnvManager:
         self._db_builder = db_builder or awm_adapter.build_session_db
         self._command = command_builder or awm_adapter.server_command
         self._methods = methods_loader or load_route_methods
+        self._call_tool = tool_caller or _default_tool_caller()
         self._clock = clock
         self._handles: dict[str, EnvHandle] = {}
         self._sem: asyncio.Semaphore | None = None
+        self._preview_sem: asyncio.Semaphore | None = None
         self._lock = threading.Lock()
         self.waiting = 0
 
@@ -364,6 +394,139 @@ class EnvManager:
         h = self.get(session_id)
         base = h.initial_db if against == "initial" else h.run_dir / "snapshots" / f"{_safe(against)}.db"
         return snap.diff(base, h.work_db)
+
+    # ------------------------------------------------------------------ approval previews
+    async def preview(
+        self,
+        session_id: str,
+        tool: str,
+        arguments: dict[str, Any],
+        timeout_s: float,
+        max_rows: int = 20,
+    ) -> dict[str, Any]:
+        """Run ``tool`` once on a shadow copy of the session's current DB and report what changed.
+
+        The copy is taken with SQLite's online-backup API, so the session's own server keeps
+        running and its DB is only read. The shadow server runs like a session env (own process
+        group, leased port, allowlisted environment) and writes only under
+        ``<run_dir>/previews/<id>/``, which is removed with the process group afterwards, on
+        success, error or timeout alike. The result is JSON-safe; ``status`` is ``ok`` or
+        ``failed`` (then ``error`` and the ``stage`` it failed in are set).
+        """
+        handle = self.get(session_id)
+        pid = uuid.uuid4().hex[:12]
+        shadow = _Shadow(handle.run_dir / "previews" / pid)
+        timings: dict[str, float] = {}
+        out: dict[str, Any] = {
+            "id": pid,
+            "session_id": session_id,
+            "tool": tool,
+            "status": "failed",
+            "error": None,
+            "stage": None,
+            "call": None,
+            "changes": None,
+            "digest": None,
+            "timings_ms": timings,
+        }
+        stage = "queue"
+        started = time.perf_counter()
+        try:
+            async with asyncio.timeout(timeout_s), self._preview_semaphore():
+                stage, t = "prepare", time.perf_counter()
+                before, db = await asyncio.to_thread(self._prepare_shadow, handle.work_db, shadow.dir)
+                timings["prepare"] = _ms(t)
+                stage, t = "start", time.perf_counter()
+                url = await self._start_shadow(handle.scenario, shadow, db)
+                timings["start"] = _ms(t)
+                stage, t = "call", time.perf_counter()
+                is_error, text = await self._call_tool(url, tool, arguments, timeout_s)
+                timings["call"] = _ms(t)
+                out["call"] = {"is_error": is_error, "text": text[:2000]}
+                stage, t = "diff", time.perf_counter()
+                result = await asyncio.to_thread(chg.changes, before, db, max_rows)
+                timings["diff"] = _ms(t)
+                out.update(status="ok", changes=result, digest=chg.digest(result))
+        except TimeoutError:
+            out["error"] = f"preview timed out after {timeout_s:g}s (stage: {stage})"
+        except Exception as exc:  # reported on the approval card; nothing escapes a preview
+            out["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+        finally:
+            t = time.perf_counter()
+            await asyncio.shield(asyncio.to_thread(self._reclaim_shadow, shadow))
+            timings["reclaim"] = _ms(t)
+            timings["total"] = _ms(started)
+        if out["status"] != "ok":
+            out["stage"] = stage
+        return out
+
+    def _preview_semaphore(self) -> asyncio.Semaphore:
+        if self._preview_sem is None:
+            self._preview_sem = asyncio.Semaphore(self.settings.max_previews)
+        return self._preview_sem
+
+    @staticmethod
+    def _prepare_shadow(work_db: Path, directory: Path) -> tuple[Path, Path]:
+        directory.mkdir(parents=True)
+        before = snap.snapshot(work_db, directory / "before.db")  # online backup: read only
+        db = directory / "shadow.db"
+        shutil.copy2(before, db)
+        return before, db
+
+    async def _start_shadow(self, scenario: str, shadow: _Shadow, db: Path) -> str:
+        s = self.settings
+        shadow.port = self.ports.allocate()
+        cmd = self._command(
+            dataset_dir=s.dataset_dir,
+            scenario=scenario,
+            db_path=db,
+            host=s.host,
+            port=shadow.port,
+            temp_server_path=shadow.dir / "temp_server.py",
+            output_dir=shadow.dir / "awm_server",
+        )
+        log = shadow.dir / "launcher.log"
+        # generated code runs here as well: allowlisted variables only (ADR-019)
+        shadow.process = self._launcher.launch(cmd, log, generated_code_env())
+        host = "127.0.0.1" if s.host in ("0.0.0.0", "") else s.host  # this process calls it
+        url = f"http://{host}:{shadow.port}/mcp"
+        while True:  # bounded by the preview's timeout
+            if shadow.process.poll() is not None:
+                code = shadow.process.returncode
+                raise EnvStartError(f"shadow server exited with code {code}\n{tail_file(log, 20)}")
+            result = await self._health(url, s.health_timeout_s)
+            if result.ok:
+                return url
+            await asyncio.sleep(s.health_poll_s)
+
+    def _reclaim_shadow(self, shadow: _Shadow) -> None:
+        if shadow.process is not None:
+            _kill_group(shadow.process, self.settings.stop_grace_s)
+        if shadow.port is not None:
+            self.ports.release(shadow.port)
+        shutil.rmtree(shadow.dir, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            shadow.dir.parent.rmdir()  # "previews/", once no other preview is running
+
+    def checkpoint(self, session_id: str) -> str:
+        """Snapshot the session's DB before a real call; ``changes_since`` consumes it."""
+        h = self.get(session_id)
+        cid = uuid.uuid4().hex[:12]
+        snap.snapshot(h.work_db, h.run_dir / "checkpoints" / f"{cid}.db")
+        return cid
+
+    def changes_since(self, session_id: str, checkpoint: str, max_rows: int = 20) -> dict[str, Any]:
+        """Row-level changes from the checkpoint to now; the checkpoint file is deleted."""
+        h = self.get(session_id)
+        path = h.run_dir / "checkpoints" / f"{_safe(checkpoint)}.db"
+        if not path.exists():  # sqlite3.connect would create an empty database
+            raise FileNotFoundError(path)
+        try:
+            return chg.changes(path, h.work_db, max_rows)
+        finally:
+            path.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                path.parent.rmdir()
 
     def _write_meta(self, handle: EnvHandle, cmd: list[str]) -> None:
         meta = {"session_id": handle.session_id, "scenario": handle.scenario, "port": handle.port, "cmd": cmd}
