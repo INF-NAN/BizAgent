@@ -1,0 +1,48 @@
+# Approval policy (Phase 18, ADR-030). Loaded when the gateway starts and validated against a schema:
+# an unknown field or a wrong type stops it with the YAML path of every problem.
+#
+# Rules are tried in order and the first match decides:
+#   auto_approve   the gateway approves on the policy's behalf: approver "policy:<id>", no preview, the
+#                  token is bound to preview_unavailable, the real change is still measured (D32)
+#   require_human  a person approves on the approval card, after a preview (ADR-029)
+#   deny           refused; nobody can approve it
+# Without a match, write and destructive calls need a person and read calls need nothing.
+# Destructive calls are never auto-approved: the code enforces it, whatever this file says.
+#
+# Rule fields (only id and decision are required):
+#   id           unique; shown on the approval card and in the audit log
+#   description  shown next to the id
+#   tools        glob(s) over the tool name, e.g. "delete_*" (default: any tool)
+#   scenarios    glob(s) over the scenario name, e.g. "e_commerce_*" (default: any scenario)
+#   risk         list of read / write / destructive (default: any risk)
+#   args         argument -> operators, all of which must hold:
+#                lt, lte, gt, gte, eq, ne (a number); in, not_in (a list of strings, numbers or booleans)
+#                A missing argument never matches. A value that cannot be compared (e.g. the string
+#                "2" where a number is expected) makes deny and require_human rules match and
+#                auto_approve rules not match.
+#
+# Try a call without running anything (it shows every rule's result and the decision):
+#   uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
+#     --scenario mini_e_commerce --tool add_item_to_cart --args '{"product_offer_id": 11, "quantity": 1}'
+version: 1
+rules:
+  - id: no-payment-method-deletion
+    description: Saved payment methods are never deleted by the agent.
+    tools: ["delete_*payment_method*"]
+    decision: deny
+
+  - id: bulk-cart-add-needs-human
+    description: Adding more than 5 units of one offer always goes to a person.
+    tools: [add_item_to_cart]
+    args:
+      quantity: {gt: 5}
+    decision: require_human
+
+  - id: small-cart-add-official
+    description: On the official e-commerce scenarios, adding up to 2 units is approved automatically.
+    scenarios: ["e_commerce_*"]
+    tools: [add_item_to_cart]
+    risk: [write]
+    args:
+      quantity: {lte: 2}
+    decision: auto_approve
