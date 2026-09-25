@@ -7,7 +7,11 @@ lets us, without touching AWM code: (1) cache identical requests on disk, (2) re
 errors / 5xx with backoff, (3) attribute token usage to the pipeline step in the ledger, and
 (4) stop at a budget (ADR-023): once the run's ledger cost reaches it, requests that would go
 upstream are refused with HTTP 402 (cache hits are still served), which makes the current step
-fail; the runner then marks it failed and a rerun with a higher budget resumes.
+fail; the runner then marks it failed and a rerun with a higher budget resumes, and (5) record
+every request that ends in an upstream error as ``failed`` (ADR-024): AWM turns such errors into
+empty replies and exits 0 (awm/gpt.py:195-206), so the runner judges the step from the ledger.
+Every entry carries the request's cache key so the runner can tell AWM's retries of one request
+apart from different requests.
 """
 
 from __future__ import annotations
@@ -29,6 +33,17 @@ from workbench.synth.ledger import Ledger, LedgerEntry, Price
 
 def cache_key(endpoint: str, body: bytes) -> str:
     return hashlib.sha256(endpoint.encode() + b"\n" + body).hexdigest()
+
+
+def _error_body(resp: httpx.Response) -> dict[str, Any]:
+    """The upstream's error body, or a wrapper when it is not a JSON object (e.g. an HTML page)."""
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
+        return data
+    return {"error": {"message": f"upstream returned HTTP {resp.status_code}: {resp.text[:300]}"}}
 
 
 def create_proxy_app(
@@ -73,48 +88,76 @@ def create_proxy_app(
         key = cache_key(endpoint, body)
         cached_file = cache_dir / f"{key}.json"
         payload: dict[str, Any] = json.loads(body or b"{}")
+        model = str(payload.get("model", ""))
         if cached_file.exists():
             data = json.loads(cached_file.read_text(encoding="utf-8"))
-            ledger.record(
-                LedgerEntry(step, str(payload.get("model", "")), 0, 0, cached=True, endpoint=endpoint)
-            )
+            ledger.record(LedgerEntry(step, model, 0, 0, cached=True, endpoint=endpoint, key=key))
             return JSONResponse(data)
-        model = str(payload.get("model", ""))
+
+        def failure(status: int | None, error: str) -> None:
+            ledger.record(
+                LedgerEntry(
+                    step,
+                    model,
+                    0,
+                    0,
+                    cached=False,
+                    endpoint=endpoint,
+                    failed=True,
+                    upstream_status=status,
+                    error=error[:300],
+                    key=key,
+                )
+            )
+
         if reason := over_budget(model):
-            ledger.record(LedgerEntry(step, model, 0, 0, cached=False, endpoint=endpoint, refused=True))
+            ledger.record(
+                LedgerEntry(step, model, 0, 0, cached=False, endpoint=endpoint, refused=True, key=key)
+            )
             message = (
                 f"workbench synthesis stopped: {reason}. Raise synth.budget (e.g. WORKBENCH_SYNTH__BUDGET)"
                 " and run the same command again to resume."
             )
             return JSONResponse({"error": {"message": message, "type": "budget_exceeded"}}, status_code=402)
-        last: str = ""
+        last_status: int | None = None
+        last = ""
         for attempt in range(max_retries + 1):
             try:
                 resp = await client.post(
                     f"/{endpoint}", content=body, headers={"content-type": "application/json"}
                 )
             except httpx.TransportError as exc:
-                last = f"{type(exc).__name__}: {exc}"
+                last_status, last = None, f"{type(exc).__name__}: {exc}"
             else:
-                if resp.status_code < 500:
-                    data = resp.json()
-                    if resp.status_code < 400:
-                        usage = data.get("usage") or {}
-                        ledger.record(
-                            LedgerEntry(
-                                step,
-                                str(data.get("model") or payload.get("model", "")),
-                                int(usage.get("prompt_tokens", 0)),
-                                int(usage.get("completion_tokens", 0)),
-                                cached=False,
-                                endpoint=endpoint,
-                            )
+                if resp.status_code < 400:
+                    try:
+                        data = resp.json()
+                    except ValueError:
+                        failure(resp.status_code, f"non-JSON response: {resp.text[:200]}")
+                        message = f"upstream returned HTTP {resp.status_code} without a JSON body"
+                        return JSONResponse({"error": {"message": message}}, status_code=502)
+                    usage = data.get("usage") or {}
+                    ledger.record(
+                        LedgerEntry(
+                            step,
+                            str(data.get("model") or model),
+                            int(usage.get("prompt_tokens", 0)),
+                            int(usage.get("completion_tokens", 0)),
+                            cached=False,
+                            endpoint=endpoint,
+                            key=key,
                         )
-                        cached_file.write_text(json.dumps(data), encoding="utf-8")
+                    )
+                    cached_file.write_text(json.dumps(data), encoding="utf-8")
                     return JSONResponse(data, status_code=resp.status_code)
-                last = f"HTTP {resp.status_code}"
+                if resp.status_code < 500:  # 4xx (402, 429, ...) is passed on, not retried here
+                    data = _error_body(resp)
+                    failure(resp.status_code, json.dumps(data.get("error", data))[:300])
+                    return JSONResponse(data, status_code=resp.status_code)
+                last_status, last = resp.status_code, f"HTTP {resp.status_code}"
             if attempt < max_retries:
                 await asyncio.sleep(backoff_s * (2**attempt))
+        failure(last_status, f"after {max_retries + 1} attempt(s): {last}")
         return JSONResponse({"error": {"message": f"upstream failed after retries: {last}"}}, status_code=502)
 
     return Starlette(routes=[Route("/step/{step}/v1/{endpoint:path}", forward, methods=["POST"])])

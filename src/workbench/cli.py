@@ -439,6 +439,12 @@ def synth_run(
         with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
             result = runner.execute(proxy_base=base)
         console.print_json(data=result)
+        for name, step in result["steps"].items():
+            if step.get("status") == "done_with_failures":  # ADR-024
+                console.print(
+                    f"[yellow]step {name}: {step['failed_requests']} LLM request(s) ended in an upstream "
+                    f"error ({step['failed_by_status']}); its output misses those parts[/yellow]"
+                )
     except SynthInterrupted as exc:  # ADR-022: the step's processes are already stopped
         console.print(f"[yellow]{exc}[/yellow]")
         raise typer.Exit(code=130) from exc

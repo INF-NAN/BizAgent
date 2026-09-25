@@ -17,6 +17,10 @@ verifier mode. Rules enforced here:
   that did not finish starts again without its outputs: they are moved to ``attempts/`` first.
 - Budget stop: before a step and after it, the run's ledger cost is checked against
   ``synth.budget``; the proxy refuses to forward once it is reached (ADR-023).
+- A step is judged from the ledger as well as from its exit code, because AWM turns failed LLM
+  requests into empty replies and exits 0 (awm/gpt.py:195-206): a refused request fails the step;
+  more requests lost to upstream errors than ``synth.max_failed_requests`` fail it; fewer mark it
+  ``done_with_failures``, never ``done`` (ADR-024).
 - ``--scenario-file`` starts at `gen task` with a hand-written scenario file instead of running
   `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-021). `gen task`
   reads only each line's ``name`` and ``description`` (awm/core/task.py:44-45, 126).
@@ -43,7 +47,7 @@ from typing import Any
 from workbench.config import Settings
 from workbench.envs.procs import descendants, live_group_members
 from workbench.subprocess_env import LLM_VARS, NETWORK_VARS, generated_code_env, pick
-from workbench.synth.ledger import Ledger, Price, load_prices
+from workbench.synth.ledger import Ledger, Price, StepRequests, load_prices, step_requests
 from workbench.synth.validate import ValidationReport, parse_check_all
 
 STEPS = ("scenario", "task", "db", "sample", "spec", "env", "verifier")
@@ -67,6 +71,10 @@ class SynthInterrupted(SynthError):
 
 class SynthBudgetExceeded(SynthError):
     """The run's ledger cost reached ``synth.budget`` (ADR-023)."""
+
+
+class SynthUpstreamErrors(SynthError):
+    """More requests of a step ended in upstream errors than ``synth.max_failed_requests`` (ADR-024)."""
 
 
 @dataclass(frozen=True)
@@ -255,6 +263,27 @@ def plan_steps(
     return [s for s in steps if not (skip_scenario and s.name == "scenario")]
 
 
+def judge_step(outputs_ok: bool, requests: StepRequests, max_failed: int) -> tuple[str, str | None]:
+    """A step's status and failure reason from its exit, its outputs and its ledger entries.
+
+    Refused requests (budget stop, ADR-023) always fail the step. Requests lost to upstream errors
+    fail it above ``max_failed``; up to it, the step is ``done_with_failures`` (ADR-024).
+    """
+    if requests.refused:
+        return "failed", "budget"
+    if requests.failed > max_failed:
+        return "failed", "upstream_errors"
+    if not outputs_ok:
+        return "failed", None
+    if requests.failed:
+        return "done_with_failures", None
+    return "done", None
+
+
+def _counts(by_status: dict[str, int]) -> str:
+    return ", ".join(f"{status}: {n}" for status, n in by_status.items())
+
+
 def _pgid(pid: int) -> int | None:
     try:
         return os.getpgid(pid)
@@ -386,6 +415,7 @@ class SynthRunner:
             "required_env": list(self.required_env),
             "missing_env": [k for k in self.required_env if not self._environ.get(k)],
             "budget": self._budget_view(),
+            "max_failed_requests": self.settings.synth.max_failed_requests,
             "steps": [
                 {
                     "name": s.name,
@@ -513,10 +543,12 @@ class SynthRunner:
         self._prepare()
         state = RunState.load(self.state_path)
         with interruptible():
+            redo = False  # once a step runs, every later step runs too: its inputs may have changed
             for step in self.plan:
-                done = state.steps.get(step.name, {}).get("status") == "done"
-                if done and all((self.run_dir / o).exists() for o in step.outputs):
+                finished = self._finished(state.steps.get(step.name, {}))
+                if not redo and finished and all((self.run_dir / o).exists() for o in step.outputs):
                     continue  # checkpoint: resume after the last completed step
+                redo = True
                 if reason := self._budget_block(prices, currency):
                     raise SynthBudgetExceeded(
                         f"not starting step {step.name}: {reason}. Raise synth.budget "
@@ -542,25 +574,41 @@ class SynthRunner:
                     raise SynthInterrupted(
                         f"interrupted during step {step.name}; run the same command again to resume"
                     ) from exc
-                refused = [e for e in self.ledger.entries()[seen:] if e.refused]
-                ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs) and not refused
-                state.steps[step.name] = {
-                    "status": "done" if ok else "failed",
+                requests = step_requests(self.ledger.entries()[seen:])
+                limit = self.settings.synth.max_failed_requests
+                outputs_ok = rc == 0 and all((self.run_dir / o).exists() for o in step.outputs)
+                status, reason = judge_step(outputs_ok, requests, limit)
+                entry: dict[str, Any] = {
+                    "status": status,
                     "returncode": rc,
                     "seconds": round(time.time() - started, 1),
                     **aside,
                 }
-                if refused:
-                    state.steps[step.name]["reason"] = "budget"
+                if reason:
+                    entry["reason"] = reason
+                if requests.refused:
+                    entry["refused_requests"] = requests.refused
+                if requests.failed:
+                    entry["failed_requests"] = requests.failed
+                    entry["failed_by_status"] = requests.failed_by_status
+                state.steps[step.name] = entry
                 state.save(self.state_path)
-                if refused:
+                if reason == "budget":
                     budget = f"{self.settings.synth.budget} {currency}"
                     raise SynthBudgetExceeded(
-                        f"step {step.name} failed: the proxy refused {len(refused)} request(s) at "
+                        f"step {step.name} failed: the proxy refused {requests.refused} request(s) at "
                         f"synth.budget {budget}. Raise it (e.g. WORKBENCH_SYNTH__BUDGET) and run the "
                         "same command again to resume."
                     )
-                if not ok:
+                if reason == "upstream_errors":
+                    raise SynthUpstreamErrors(
+                        f"step {step.name} failed: {requests.failed} request(s) ended in an upstream error "
+                        f"after every retry ({_counts(requests.failed_by_status)}), more than "
+                        f"synth.max_failed_requests={limit}. Fix the upstream or raise the limit (e.g. "
+                        "WORKBENCH_SYNTH__MAX_FAILED_REQUESTS), then run the same command again to resume; "
+                        "requests already answered are replayed from the cache."
+                    )
+                if status == "failed":
                     raise SynthError(
                         f"step {step.name} failed (rc={rc}); see {self.run_dir / 'logs' / step.name}.log"
                     )
@@ -577,6 +625,17 @@ class SynthRunner:
                         "interrupted during the validation; run the same command again to redo it"
                     ) from exc
         return result
+
+    def _finished(self, entry: dict[str, Any]) -> bool:
+        """Whether a recorded step counts as finished under the current settings (ADR-024).
+
+        ``done_with_failures`` counts only while its lost requests stay within
+        ``synth.max_failed_requests``; lower the limit and the same command redoes the step.
+        """
+        if entry.get("status") == "done":
+            return True
+        limit = self.settings.synth.max_failed_requests
+        return entry.get("status") == "done_with_failures" and int(entry.get("failed_requests", 0)) <= limit
 
     def validate(self) -> ValidationReport:
         # reset_db and check_all run generated SQL and server code and call no LLM: no keys.
@@ -607,6 +666,12 @@ def validate_run(run_dir: Path, run: CommandRunner, env: dict[str, str]) -> Vali
     report = parse_check_all(
         check_log.read_text(encoding="utf-8", errors="replace") if check_log.exists() else "", run_dir
     )
+    state = RunState.load(run_dir / "state.json")
+    report.request_failures = {
+        name: {k: s[k] for k in ("status", "failed_requests", "failed_by_status") if k in s}
+        for name, s in state.steps.items()
+        if s.get("failed_requests")
+    }
     (run_dir / "validation.json").write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
     (run_dir / "validation.md").write_text(report.markdown(), encoding="utf-8")
     return report

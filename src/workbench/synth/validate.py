@@ -50,6 +50,8 @@ class ValidationReport:
     failed: dict[str, str] = field(default_factory=dict)
     failure_categories: dict[str, int] = field(default_factory=dict)
     tools_per_env: dict[str, int] = field(default_factory=dict)
+    # gen steps whose LLM requests ended in upstream errors (ADR-024), from the run's state.json
+    request_failures: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +62,7 @@ class ValidationReport:
             "tools_per_env": self.tools_per_env,
             "failure_categories": self.failure_categories,
             "failed": self.failed,
+            "gen_steps_with_failed_requests": self.request_failures,
         }
 
     def markdown(self) -> str:
@@ -77,6 +80,23 @@ class ValidationReport:
             "|---|---|",
             *[f"| {k} | {v} |" for k, v in sorted(self.failure_categories.items())],
         ]
+        if self.request_failures:
+            lines += [
+                "",
+                "## gen steps with failed LLM requests",
+                "",
+                "These requests ended in an upstream error after every retry; AWM wrote empty results",
+                "for them, so the step's output is missing those parts (ADR-024).",
+                "",
+                "| step | status | failed requests | by last error |",
+                "|---|---|---|---|",
+                *[
+                    f"| {name} | {f.get('status')} | {f.get('failed_requests')} | "
+                    + ", ".join(f"{k}: {v}" for k, v in (f.get("failed_by_status") or {}).items())
+                    + " |"
+                    for name, f in self.request_failures.items()
+                ],
+            ]
         return "\n".join(lines) + "\n"
 
 

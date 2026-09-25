@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
-from collections import defaultdict
-from dataclasses import asdict, dataclass
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,14 @@ class LedgerEntry:
     endpoint: str = "chat"
     # True when the proxy refused to forward the request (budget stop, ADR-023): nothing was billed.
     refused: bool = False
+    # True when the request ended in an upstream error after the proxy's retries (ADR-024): an HTTP
+    # error status, or a network error when ``upstream_status`` is None.
+    failed: bool = False
+    upstream_status: int | None = None
+    error: str = ""
+    # cache key of the request body; AWM retries a request with the same body, so this ties the
+    # attempts of one request together (ADR-024). Empty in ledgers written before Phase 15.
+    key: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,7 +72,7 @@ class Ledger:
         total = 0.0
         unpriced: set[str] = set()
         for e in self.entries():
-            if e.cached or e.refused:
+            if e.cached or e.refused or e.failed:
                 continue
             price = prices.get(e.model)
             if price is None:
@@ -81,6 +89,7 @@ class Ledger:
                 "calls": 0,
                 "cached_calls": 0,
                 "refused_calls": 0,
+                "failed_calls": 0,
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
                 "cost": 0.0,
@@ -91,6 +100,9 @@ class Ledger:
             s = steps[e.step]
             if e.refused:  # never reached the upstream
                 s["refused_calls"] += 1
+                continue
+            if e.failed:  # the upstream answered with an error, or could not be reached
+                s["failed_calls"] += 1
                 continue
             s["calls"] += 1
             if e.cached:
@@ -118,3 +130,27 @@ class Ledger:
             "complete": not any(v["unpriced_models"] for v in out.values()),
         }
         return {"steps": out, "total": total}
+
+
+@dataclass(frozen=True)
+class StepRequests:
+    """How the LLM requests of one step ended (ADR-024).
+
+    A request is identified by its cache key, so AWM's retries of it count once and the last
+    attempt decides: a request that failed and then succeeded is not lost.
+    """
+
+    refused: int = 0  # ended refused by the budget stop (ADR-023)
+    failed: int = 0  # ended in an upstream error after every retry
+    failed_by_status: dict[str, int] = field(default_factory=dict)  # "402", "503", "network", ...
+
+
+def step_requests(entries: list[LedgerEntry]) -> StepRequests:
+    """Evaluate the ledger entries one step wrote (see StepRequests)."""
+    last: dict[str, LedgerEntry] = {}
+    for i, e in enumerate(entries):
+        last[e.key or f"#{i}"] = e  # entries without a key (older ledgers) stand alone
+    refused = [e for e in last.values() if e.refused]
+    failed = [e for e in last.values() if e.failed]
+    by_status = Counter("network" if e.upstream_status is None else str(e.upstream_status) for e in failed)
+    return StepRequests(len(refused), len(failed), dict(sorted(by_status.items())))

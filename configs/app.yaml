@@ -43,3 +43,8 @@ synth:
   # current step fails; raise it (e.g. WORKBENCH_SYNTH__BUDGET=8) and rerun the same command to
   # resume. null disables the stop.
   budget: 5.0
+  # A gen step whose LLM requests end in an upstream error after every retry (HTTP 4xx/5xx or a
+  # network error; AWM then writes empty results and exits 0) is judged from the ledger (ADR-024):
+  # more such requests than this fail the step, and the same command resumes it; 1..this many mark
+  # it done_with_failures (listed in the output and in validation.json), never done.
+  max_failed_requests: 0

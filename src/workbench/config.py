@@ -118,6 +118,9 @@ class SynthSettings(BaseModel):
     # Budget stop (ADR-023): once the run's ledger cost, in the pricing file's currency, reaches this
     # value the proxy refuses to forward and the current step fails. None disables it.
     budget: float | None = 5.0
+    # Requests of one step that may end in an upstream error after every retry (ADR-024). More fail
+    # the step (resumable); 1..max_failed_requests mark it done_with_failures, never done.
+    max_failed_requests: int = Field(default=0, ge=0)
 
 
 class TrainSettings(BaseModel):

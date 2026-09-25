@@ -151,7 +151,11 @@ exit=0
   - `proxy.py` 的 `over_budget`；
   - 测试 `tests/unit/test_synth_resilience.py` 与 `tests/unit/synth_harness.py`：真实子进程，假上游监听真实端口，零成本。
 - **零成本验证**：见 `docs/verification/2026-09-24-phase14-synth-resilience.md`，其中用真实 AWM 重做了 Phase 13 的中断。
-- **已知限制**：步骤是否成功只看退出码与输出文件，上游持续出错时步骤仍可能被记为完成（LIMITATIONS §6）。
+- **上游错误**（Phase 15 起，ADR-024）：
+  - 代理把所有重试后仍以上游错误结束的请求记入账本；
+  - 某步丢失的请求多于 `synth.max_failed_requests`（默认 0）时，这一步失败，修复上游后用同一命令续跑；
+  - 丢失的请求不超过阈值时，这一步记为 `done_with_failures`，失败数列在 CLI 输出与 `validation.json` 中；
+  - 阅读 `ledger.py` 的 `step_requests` 与 `runner.py` 的 `judge_step`，测试见 `tests/unit/test_synth_failures.py`。
 
 ## 3. 服务：模型服务与 LLM 客户端
 
