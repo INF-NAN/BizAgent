@@ -75,7 +75,7 @@ GitHub Actions 的 docker-smoke 任务在每次 push 到 `main`、`phase9-verifi
 
 ## GPU 部署路径（UNVERIFIED-LOCAL）
 
-截至 2026-09-25 本轮收尾，下面需要 GPU 的步骤都**还没有在 GPU 上执行过**：Phase 15 runbook 已就绪，仓库主人尚未在 GPU 机器上执行（`docs/verification/user-decisions.md` D22；对应 [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §1.1 的 U1、U3、U4、U5、U8）。[docs/runbooks/phase15-gpu.md](docs/runbooks/phase15-gpu.md) 给出从零开始的逐条命令、预期输出、回贴与脱敏要求，以及国内镜像站的用法。
+截至 2026-09-25 TASK_v2 收尾，下面需要 GPU 的步骤都**还没有在 GPU 上执行过**：Phase 15 runbook 已就绪，仓库主人尚未在 GPU 机器上执行（`docs/verification/user-decisions.md` D22；对应 [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §1.1 的 U1、U3、U4、U5、U8）。[docs/runbooks/phase15-gpu.md](docs/runbooks/phase15-gpu.md) 给出从零开始的逐条命令、预期输出、回贴与脱敏要求，以及国内镜像站的用法。
 
 1. 数据：`make data`（下载 AgentWorldModel-1K 到 `data/awm1k/`，不入库；CC-BY-4.0，使用时请署名）。**已验证**（2026-09-24，CPU 容器）。
 2. 模型服务：`scripts/serve_vllm.sh`（参数来自 `configs/serving/arctic-awm-4b.yaml`，可先用 `uv run workbench serve vllm-cmd` 查看；服务起来后可用 `uv run workbench serve probe` 检查两类工具调用请求）。未验证（U1）。
