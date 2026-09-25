@@ -2,7 +2,8 @@
 
 Uses the sqlite3 online-backup API, so it is safe while the AWM server holds the database
 open. ``diff`` compares table-level row counts and primary-key sets (rows keyed by the
-table's primary key, or by ``rowid`` when a table has none).
+table's primary key, or by ``rowid`` when a table has none); ``workbench.envs.changes`` reads
+rows with the same keys and adds row contents and changed columns (approval previews, ADR-029).
 """
 
 from __future__ import annotations
@@ -80,37 +81,39 @@ class DbDiff:
         }
 
 
-def _tables(conn: sqlite3.Connection) -> list[str]:
+def list_tables(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
     return [str(r[0]) for r in rows]
 
 
-def _pk_columns(conn: sqlite3.Connection, table: str) -> list[str]:
+def pk_columns(conn: sqlite3.Connection, table: str) -> list[str]:
     info = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
     pk = sorted((int(r[5]), str(r[1])) for r in info if int(r[5]) > 0)
     return [name for _, name in pk]
 
 
-def _rows_by_key(conn: sqlite3.Connection, table: str) -> dict[Any, tuple[Any, ...]]:
-    pk = _pk_columns(conn, table)
+def rows_by_key(conn: sqlite3.Connection, table: str) -> tuple[list[str], dict[Any, tuple[Any, ...]]]:
+    """Column names and every row keyed by the primary key (a tuple if composite) or by rowid."""
+    pk = pk_columns(conn, table)
     key_sql = ", ".join(f'"{c}"' for c in pk) if pk else "rowid"
     cur = conn.execute(f'SELECT {key_sql}, * FROM "{table}"')
     width = len(pk) if pk else 1
+    columns = [str(d[0]) for d in cur.description][width:]
     out: dict[Any, tuple[Any, ...]] = {}
     for row in cur.fetchall():
         key = row[0] if width == 1 else tuple(row[:width])
         out[key] = tuple(row[width:])
-    return out
+    return columns, out
 
 
 def diff(before: Path, after: Path, max_keys: int = 50) -> DbDiff:
     with closing(sqlite3.connect(before)) as a, closing(sqlite3.connect(after)) as b:
-        ta, tb = set(_tables(a)), set(_tables(b))
+        ta, tb = set(list_tables(a)), set(list_tables(b))
         result = DbDiff(tables={}, tables_added=sorted(tb - ta), tables_removed=sorted(ta - tb))
         for table in sorted(ta & tb):
-            ra, rb = _rows_by_key(a, table), _rows_by_key(b, table)
+            ra, rb = rows_by_key(a, table)[1], rows_by_key(b, table)[1]
             added = [k for k in rb if k not in ra]
             removed = [k for k in ra if k not in rb]
             changed = [k for k in ra if k in rb and ra[k] != rb[k]]
@@ -130,7 +133,7 @@ def fingerprint(db_path: Path) -> str:
 
     h = hashlib.sha256()
     with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
-        for table in _tables(conn):
+        for table in list_tables(conn):
             h.update(table.encode())
             for row in sorted(repr(r) for r in conn.execute(f'SELECT * FROM "{table}"').fetchall()):
                 h.update(row.encode())
