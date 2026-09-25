@@ -627,3 +627,22 @@
   - 按前缀放行比只按名称放行宽：前缀之内名字不像凭据的变量都会传下去。
   - 白名单是否够用，只能在 GPU 机器上验证（Phase 15B，UNVERIFIED-LOCAL）。缺了变量时，训练会在那台机器上报错，处理办法是把它加到 `train.env_passthrough`。
   - 与 ADR-019 相同，只隔离环境变量。`HOME` 放行后，训练进程仍能读到该用户可读的文件，例如 `huggingface-cli login` 保存的 token 文件或 `~/.netrc`。
+
+## ADR-027 flash-attn 的构建环境使用锁定版本的 torch（`match-runtime`）
+
+- **背景**：
+  - flash-attn 2.8.3.post1 在 PyPI 上只有源码包。它在构建环境里 import torch 来编译 CUDA 扩展（flash-attn `setup.py:22-23`），编出的扩展只能配合同一版本的 torch 使用；`setup.py` 还会按构建环境中 torch 的版本去 GitHub 找预编译 wheel（`:440-472`）。
+  - `train/pyproject.toml` 沿用了 AgentFly 的写法 `[tool.uv.extra-build-dependencies] flash-attn = ["torch"]`（`third_party/AgentFly/pyproject.toml:98-99`）。
+  - 2026-09-25 写 Phase 15 runbook 时，用 uv 0.8.17 做了一个最小实验（RECON "Phase 15 runbook"）：运行时依赖锁定 `six==1.16.0`，一个本地源码包的额外构建依赖写成 `"six"`，构建时装进去的是最新的 six 1.17.0；改成 `{ requirement = "six", match-runtime = true }` 后，装进去的是锁定的 1.16.0。
+  - 同一天 PyPI 上最新的 torch 是 2.14.0，依赖 CUDA 13.0 的 `cuda-toolkit`。按原来的写法，flash-attn 会在构建环境里对着 torch 2.14.0 编译：机器上的 nvcc 是 12.x 时，torch 的扩展构建会因 CUDA 主版本不同而报错；就算编出来，也与运行时的 torch 2.10.0 二进制不兼容，要到 import 时才失败。U3、U5 会因此在租来的机器上失败，而原因与要验证的内容无关。
+- **可选方案**：
+  1. 保持原样，在 runbook 里让仓库主人先手动装好 torch，再用 `--no-build-isolation` 构建：步骤多，而且绕开了锁文件；
+  2. 把构建依赖改成 `match-runtime = true`，让构建环境使用锁文件中的 torch 2.10.0。
+- **决定**：选方案 2，只改本仓库的 `train/pyproject.toml`，不改 AgentFly。uv 只读取项目根目录的 `[tool.uv]` 设置，路径依赖自己的 `[tool.uv]` 不生效，所以不需要给上游打补丁。
+- **验证**：
+  - `cd train && uv lock --check` 通过（退出码 0），`train/uv.lock` 没有变化（修改前后 md5 相同）；
+  - 上面的最小实验在本容器中复现了两种写法的差别；
+  - 真正的编译只能在 GPU 机器上验证（runbook §4.2，UNVERIFIED-LOCAL）。
+- **代价**：
+  - `extra-build-dependencies` 在 uv 中仍是实验特性（uv 0.8.17 会打印 warning），行为可能随 uv 版本变化，所以 runbook 固定使用 uv 0.8.17；
+  - 构建环境仍然要从 PyPI 取得 torch 2.10.0（与运行环境共用 uv 缓存），编译时间不变。

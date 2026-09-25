@@ -19,4 +19,7 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 agentfly = { path = "../third_party/AgentFly", editable = true }
 
 [tool.uv.extra-build-dependencies]
-flash-attn = ["torch"]
+# flash-attn (sdist only) compiles against the torch in its build environment. A plain "torch"
+# there is resolved on its own, to the newest release (uv 0.8.17, docs/RECON.md "Phase 15 前置修复"),
+# not the locked 2.10.0 the extension is loaded into; match-runtime pins it to the lock (ADR-027).
+flash-attn = [{ requirement = "torch", match-runtime = true }]
