@@ -191,8 +191,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/approvals/{sid}")
     async def decide(sid: str, body: ApprovalIn) -> Any:
         info = _session(sid)
-        if rt.runner is None or await rt.runner.pending_approval(info.thread_id) is None:
+        pending = await rt.runner.pending_approval(info.thread_id) if rt.runner is not None else None
+        if rt.runner is None or pending is None:
             raise HTTPException(404, "no pending approval for this session")
+        preview = pending.get("preview") or {}
+        if body.approved and preview and not preview.get("approvable", True):
+            # approval.require_preview is on for this risk level and the preview failed (ADR-029)
+            raise HTTPException(
+                409,
+                f"a {pending.get('risk')} call needs a successful preview before approval; "
+                f"the preview failed ({preview.get('error')}); only a rejection is possible",
+            )
         _claim(sid)
         asked = state.approval_asked_at.pop(sid, None)
         if asked is not None:

@@ -8,6 +8,7 @@ from langgraph.types import interrupt
 from workbench.agent.deps import AgentDeps
 from workbench.agent.nodes.intake import Node
 from workbench.agent.state import AgentState
+from workbench.gateway.policy import ApprovalError
 
 
 def make_approve(deps: AgentDeps) -> Node:
@@ -15,6 +16,7 @@ def make_approve(deps: AgentDeps) -> Node:
         sid = state["session_id"]
         pc = state["pending_call"]
         assert pc is not None
+        preview = pc.get("preview")
         # Pauses the graph; the API resumes it with Command(resume={"approved": ..., ...}).
         decision: dict[str, Any] = interrupt(
             {
@@ -23,15 +25,24 @@ def make_approve(deps: AgentDeps) -> Node:
                 "tool": pc["name"],
                 "arguments": pc["arguments"],
                 "risk": pc["risk"],
+                "preview": preview,  # the rows this call will change, or why the preview failed
             }
         )
         approver = str(decision.get("approver") or "unknown")
-        if decision.get("approved"):
-            token = deps.gateway.issue_approval(sid, pc["name"], pc["arguments"], approver=approver)
-            deps.hub.emit(sid, "approval_granted", tool=pc["name"], approver=approver)
-            return {"approval_token": token, "next": "observe"}
         reason = str(decision.get("reason") or "no reason given")
-        deps.hub.emit(sid, "approval_rejected", tool=pc["name"], approver=approver, reason=reason)
+        if decision.get("approved"):
+            try:
+                token = deps.gateway.issue_approval(
+                    sid, pc["name"], pc["arguments"], approver=approver, preview=preview
+                )
+            except ApprovalError as exc:  # a required preview failed: only a rejection is possible
+                reason = f"approval refused: {exc}"
+                deps.hub.emit(sid, "approval_refused", tool=pc["name"], approver=approver, reason=reason)
+            else:
+                deps.hub.emit(sid, "approval_granted", tool=pc["name"], approver=approver)
+                return {"approval_token": token, "next": "observe"}
+        else:
+            deps.hub.emit(sid, "approval_rejected", tool=pc["name"], approver=approver, reason=reason)
         messages = [
             *state["messages"],
             {

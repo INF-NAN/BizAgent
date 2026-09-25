@@ -70,7 +70,7 @@ def make_act(deps: AgentDeps) -> Node:
             "call_counts": counts,
             "steps": steps,
             "tokens_used": tokens,
-            "next": "approve" if needs_approval else "observe",
+            "next": "preview" if needs_approval else "observe",
         }
 
     return act

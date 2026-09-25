@@ -17,8 +17,15 @@ from workbench.obs.tracing import TraceHub
 class GatewayLike(Protocol):
     def list_tools(self, session_id: str) -> list[GatewayTool]: ...
     def requires_approval(self, session_id: str, prefixed: str) -> bool: ...
+    async def preview(self, session_id: str, prefixed: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def issue_approval(
-        self, session_id: str, prefixed: str, arguments: dict[str, Any], approver: str
+        self,
+        session_id: str,
+        prefixed: str,
+        arguments: dict[str, Any],
+        approver: str,
+        *,
+        preview: dict[str, Any] | None = None,
     ) -> str: ...
     async def call_tool(
         self,

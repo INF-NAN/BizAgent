@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import sqlite3
+import tempfile
 from collections.abc import AsyncIterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +17,8 @@ from fastapi import FastAPI
 
 from tests.unit.agent_harness import FIX, MiniUpstream
 from workbench.api.app import create_app
-from workbench.config import Settings
+from workbench.config import ApprovalSettings, Settings
+from workbench.envs.changes import changes, digest
 from workbench.envs.service import EnvInfo
 from workbench.gateway.core import Gateway
 from workbench.gateway.policy import ApprovalService, PolicyConfig
@@ -23,10 +28,28 @@ from workbench.llm.types import ChatResult, Message
 from workbench.runtime import Runtime
 
 
+def cart_item_added() -> dict[str, Any]:
+    """What adding offer 11 to the mini cart changes, as workbench.envs.changes reports it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        before, after = Path(tmp) / "before.db", Path(tmp) / "after.db"
+        with closing(sqlite3.connect(before)) as conn:
+            conn.executescript(
+                "CREATE TABLE cart_items (id INTEGER PRIMARY KEY, cart_id INTEGER, product_offer_id INTEGER,"
+                " quantity INTEGER); INSERT INTO cart_items VALUES (1, 1, 12, 1);"
+            )
+        shutil.copy2(before, after)
+        with closing(sqlite3.connect(after)) as conn:
+            conn.execute("INSERT INTO cart_items VALUES (2, 1, 11, 1)")
+            conn.commit()
+        return changes(before, after)
+
+
 class FakeEnvService:
-    def __init__(self) -> None:
+    def __init__(self, preview_status: str = "ok") -> None:
         self.started: list[str] = []
         self.stopped: list[str] = []
+        self.preview_status = preview_status
+        self.previews: list[str] = []
 
     async def start(self, scenario: str, session_id: str | None = None) -> EnvInfo:
         sid = session_id or "x"
@@ -58,6 +81,26 @@ class FakeEnvService:
     async def touch(self, session_id: str) -> None: ...
     async def close(self) -> None: ...
 
+    async def preview(
+        self, session_id: str, tool: str, arguments: dict[str, Any], timeout_s: float, max_rows: int = 20
+    ) -> dict[str, Any]:
+        self.previews.append(tool)
+        if self.preview_status != "ok":
+            return {
+                "id": "pv",
+                "status": "failed",
+                "stage": "start",
+                "error": "shadow server exited with code 1",
+            }
+        c = cart_item_added()
+        return {"id": "pv", "status": "ok", "changes": c, "digest": digest(c), "timings_ms": {"total": 1.0}}
+
+    async def checkpoint(self, session_id: str) -> str:
+        return "cp"
+
+    async def changes_since(self, session_id: str, checkpoint: str) -> dict[str, Any]:
+        return cart_item_added()
+
 
 def make_settings(tmp_path: Path, **api: Any) -> Settings:
     return Settings(
@@ -68,9 +111,11 @@ def make_settings(tmp_path: Path, **api: Any) -> Settings:
     )
 
 
-def make_app(tmp_path: Path, backend: Any = None, **api: Any) -> tuple[FastAPI, Runtime, FakeEnvService]:
+def make_app(
+    tmp_path: Path, backend: Any = None, envs: FakeEnvService | None = None, **api: Any
+) -> tuple[FastAPI, Runtime, FakeEnvService]:
     settings = make_settings(tmp_path, **api)
-    envs = FakeEnvService()
+    envs = envs or FakeEnvService()
     gateway = Gateway(
         settings.gateway,
         policy=PolicyConfig.load(Path("configs/tool_policy.yaml")),
@@ -115,15 +160,25 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         events = sse_events(r.text)
         assert events[-1]["type"] == "approval_required"
         assert any(e["type"] == "tool_call" for e in events)
+        # the approval request carries the preview: the rows the call will change (ADR-029)
+        preview = events[-1]["preview"]
+        assert preview["status"] == "ok" and preview["approvable"] and preview["summary"] == "cart_items +1"
+        assert preview["changes"]["tables"]["cart_items"]["added"][0]["row"]["product_offer_id"] == 11
+        assert envs.previews == ["add_item_to_cart"]
 
         pending = (await c.get("/approvals")).json()
         assert pending[0]["approval_id"] == sid and pending[0]["tool"].endswith("add_item_to_cart")
+        assert pending[0]["preview"]["digest"] == preview["digest"]
         # a new message while an approval is pending is refused
         assert (await c.post(f"/sessions/{sid}/messages", json={"content": "hi"})).status_code == 409
 
         r = await c.post(f"/approvals/{sid}", json={"approved": True, "approver": "alice"})
         done = sse_events(r.text)[-1]
         assert done["type"] == "done" and "added" in done["final_answer"].lower()
+        write = next(e for e in sse_events(r.text) if e["type"] == "tool_call")
+        assert (
+            write["preview_check"]["result"] == "match" and write["preview"]["binding"] == preview["digest"]
+        )
         assert (
             await c.post(f"/approvals/{sid}", json={"approved": True, "approver": "x"})
         ).status_code == 404
@@ -148,6 +203,22 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         assert envs.stopped == [sid]
         assert (await c.get(f"/sessions/{sid}/trace")).status_code == 200
         assert (await c.post(f"/sessions/{sid}/messages", json={"content": "x"})).status_code == 404
+
+
+async def test_approval_is_refused_when_a_required_preview_failed(tmp_path: Path) -> None:
+    app, rt, _ = make_app(tmp_path, envs=FakeEnvService(preview_status="failed"))
+    rt.gateway.approval_settings = ApprovalSettings(require_preview={"write": True, "destructive": True})
+    async for c in lifespan_client(app):
+        sid = (await c.post("/sessions", json={"scenario": "mini_e_commerce"})).json()["session_id"]
+        r = await c.post(f"/sessions/{sid}/messages", json={"content": "buy the best headphones under $200"})
+        card = sse_events(r.text)[-1]
+        assert card["type"] == "approval_required"
+        assert card["preview"]["status"] == "failed" and card["preview"]["approvable"] is False
+        assert card["preview"]["error"] == "shadow server exited with code 1"
+        r = await c.post(f"/approvals/{sid}", json={"approved": True, "approver": "alice"})
+        assert r.status_code == 409 and "only a rejection is possible" in r.json()["detail"]
+        assert (await c.get("/approvals")).json()[0]["approval_id"] == sid  # still pending
+        assert [e for e in rt.hub.events(sid) if e["type"] == "approval_granted"] == []
 
 
 async def test_ui_is_served(tmp_path: Path) -> None:
