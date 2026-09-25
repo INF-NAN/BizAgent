@@ -3,6 +3,7 @@ name = "bizagent-workbench"
 version = "0.1.0"
 description = "Engineering workbench around Agent World Model (AWM) MCP environments: env manager, MCP gateway, LangGraph agent, API/UI."
 readme = "README.md"
+license = "MIT"  # own code only: third_party/, datasets and models keep their own terms
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # Upstream AWM, used through its Python interface and CLI (never copied; see docs/UPSTREAM.md).

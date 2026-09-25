@@ -94,6 +94,18 @@ GitHub Actions 的 docker-smoke 任务在每次 push 到 `phase9-verification` �
 
 `make check-numbers` 会拦截 README 与 docs 中未登记的性能类数字。
 
+## 许可证
+
+本仓库自有代码按 [MIT](LICENSE) 授权，版权人 Yueyi Li。自有代码即 [docs/UPSTREAM.md](docs/UPSTREAM.md) §2.2 所列的文件，包括 `src/workbench/`、`tests/`、`scripts/`、`configs/`、`ui/` 与文档。
+
+MIT **只覆盖本仓库自有代码**。下列内容不在其内，各按各自的条款：
+
+- `third_party/` 下的子模块：AgentFly 及其嵌套的 veRL 为 Apache-2.0；**AWM 目前没有许可证**，本仓库只以 submodule 指针引用它，不对 AWM 代码授予任何权利（ADR-003）。
+- 数据集 AgentWorldModel-1K：CC-BY-4.0，使用时须署名（见下节）。仓库中摘自该数据集的内容也按 CC-BY-4.0，包括 `docs/verification/` 中的运行记录与工具清单，以及 `tests/fixtures/awm_mini/` 借用的官方工具名与参数名（来源与改动见其 `MANIFEST.json`）。
+- 模型 Arctic-AWM-4B/8B/14B：Apache-2.0。
+
+数据集与模型权重都不入库，只提供下载脚本。
+
 ## 数据集署名（CC-BY-4.0）
 
 AgentWorldModel-1K，作者 Zhaoyang Wang, Canwen Xu, Boyi Liu, Yite Wang, Siwei Han, Zhewei Yao, Huaxiu Yao, Yuxiong He；配套论文 *Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning*（arXiv:2602.10090）；链接 https://huggingface.co/datasets/Snowflake/AgentWorldModel-1K ；许可证 [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)。本仓库不分发、不修改该数据集，只提供下载脚本；详见 [docs/UPSTREAM.md](docs/UPSTREAM.md) §5。

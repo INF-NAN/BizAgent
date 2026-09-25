@@ -46,6 +46,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | 路径 | 内容 |
 |---|---|
 | `.gitmodules` | 子模块声明（URL、路径、`shallow = true`） |
+| `LICENSE` | 本仓库自有代码的 MIT 许可证（版权人 Yueyi Li）；不覆盖上游、数据集与模型（§3.2） |
 | `TASK.md`、`TASK_v2.md`、`CLAUDE.md` | 任务书原文（Phase 0–8、Phase 9–15）；R1–R14 要点与当前状态 |
 | `docs/verification/**` | Phase 9 起的外部核实记录与真实环境运行日志（N1） |
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
@@ -129,6 +130,12 @@ git -C third_party/AgentFly status --porcelain            # 应为空
   - 如果 AWM 上游将来加入许可证，需要重新评估本节。
 - **数据集（CC-BY-4.0）与模型（Apache-2.0）**：均允许公开展示与使用。本仓库不包含数据与权重，只提供下载脚本；使用数据集须按 CC-BY-4.0 署名（见 §5）。开发与 CI 测试基于手写的迷你夹具，不依赖官方数据。
 - **AgentFly / veRL（Apache-2.0）、OpenEnv（BSD-3-Clause）**：允许公开展示和使用，分发副本时需要保留版权与许可证声明。本仓库只以 submodule 或链接方式引用，不分发副本。
+
+### 3.2 本仓库自有代码的许可证
+
+- 2026-09-25（Phase 16）起，本仓库自有代码按 MIT 授权：根目录 `LICENSE`，版权人 Yueyi Li；`pyproject.toml` 与 `train/pyproject.toml` 的 `license = "MIT"`。
+- MIT 只覆盖 §2.2 所列的本仓库文件。§2.1 的上游、数据集与模型各按 §3 表中的条款；AWM 仍没有许可证，本仓库不对其代码授予任何权利。
+- 仓库中摘自 AgentWorldModel-1K 的内容仍按 CC-BY-4.0 署名（§5），包括 `docs/verification/` 中的运行记录与工具清单，以及迷你夹具借用的接口命名。
 
 ## 4. 数据与权重
 
