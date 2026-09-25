@@ -333,6 +333,29 @@ def serve_vllm_cmd(
         typer.echo(shlex.join(cmd))
 
 
+@serve_app.command("probe")
+def serve_probe(
+    base_url: str | None = typer.Option(None, "--base-url", help="Default: llm.base_url."),
+    model: str | None = typer.Option(None, "--model", help="Default: llm.model."),
+    only: str | None = typer.Option(None, "--only", help="native | text (default: both)."),
+) -> None:
+    """Send one native-tools request and one `awm agent` text-protocol request to the service (U1)."""
+    from workbench.llm.probe import PROBES, ProbeError, failed, run_probe
+
+    if only is not None and only not in PROBES:
+        console.print(f"[red]--only must be one of {', '.join(PROBES)}[/red]")
+        raise typer.Exit(code=2)
+    llm = get_settings().llm
+    update = {k: v for k, v in (("base_url", base_url), ("model", model)) if v}
+    try:
+        report = _run(run_probe(llm.model_copy(update=update), PROBES if only is None else (only,)))
+    except ProbeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print_json(data=report)
+    raise typer.Exit(code=1 if failed(report) else 0)
+
+
 @agent_app.command("run")
 def agent_run(
     request: str,
