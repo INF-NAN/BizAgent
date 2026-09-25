@@ -67,7 +67,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，不在 CI 安装）；flash-attn 的构建环境使用锁定的 torch（ADR-027） |
 | `Makefile` | 开发入口 |
 | `.pre-commit-config.yaml`、`.secrets.baseline` | ruff、detect-secrets、submodule 干净检查 |
-| `.github/workflows/ci.yml` | CI（lint、test、check-numbers） |
+| `.github/workflows/ci.yml` | CI（lint 含相对链接检查、secrets、test、check-numbers、doctor） |
 | `.github/workflows/docker-smoke.yml` | Docker 冒烟：构建、启动（不带 gpu profile）、经 HTTP API 走一遍 mock 演示、停止；不推送镜像 |
 | `.gitignore`、`.dockerignore`、`.env.example` | 忽略规则与环境变量模板（无密钥） |
 | `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm）。镜像内含 AWM 代码，只用于本地和 CI 构建，不得推送到任何镜像仓库（§3.1、ADR-003） |
@@ -81,6 +81,7 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |
 | `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright）；生成 README 的两张 mock 演示截图 |
 | `scripts/docker_smoke.py` | Docker 冒烟脚本（只用标准库；测量镜像大小与冷启动耗时） |
+| `scripts/check_links.py` | README 与 `docs/**/*.md` 的相对链接与图片检查（`make lint` 与 CI；只用标准库） |
 | `scripts/redact_paste.py` | Phase 15 回贴内容的脱敏脚本（N1；邮箱、卡号、电话沿用网关审计规则） |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
 | `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019）与训练环境白名单（ADR-026） |
