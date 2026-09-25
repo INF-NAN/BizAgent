@@ -2,11 +2,13 @@ name: docker-smoke
 # Phase 14 (owner decision D15): build the compose stack, start it without the gpu profile, run the
 # scripted mock demo (query -> write -> approval -> done) over the HTTP API, print image sizes and
 # the cold-start time, then stop the stack. See scripts/docker_smoke.py and docs/verification/.
+# Triggers (owner decision D27): pushes to main and pull requests into main, so every working
+# branch is smoked through its PR without being named here.
 on:
   push:
-    # D15 named phase9-verification and main. polish-v3, the branch of Phases 16-18, is added so
-    # its changes (the license field, the approval-preview assertion) are smoked before main.
-    branches: [phase9-verification, main, polish-v3]
+    branches: [main]
+  pull_request:
+    branches: [main]
 jobs:
   docker-smoke:
     runs-on: ubuntu-latest

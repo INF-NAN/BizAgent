@@ -67,7 +67,7 @@ Docker 版本（CPU、mock LLM）：需要 Docker 与 Compose v2，并且检出�
 python3 scripts/docker_smoke.py   # 构建 → 启动 env-manager 与 app → 经 HTTP API 走一遍上面的演示 → 停止
 ```
 
-GitHub Actions 的 docker-smoke 任务在每次 push 到 `main`、`phase9-verification` 与本轮工作分支 `polish-v3` 时运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
+GitHub Actions 的 docker-smoke 任务在每次 push 到 `main`、以及每个以 `main` 为目标的 PR 上运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
 
 镜像内含 AWM 代码，而 AWM 没有许可证，所以镜像只用于本地和 CI 构建，不得推送到任何镜像仓库（ADR-003）。
 
