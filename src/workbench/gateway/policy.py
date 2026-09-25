@@ -218,7 +218,9 @@ class ApprovalService:
 
 
 # --------------------------------------------------------------------------- decisions
-DecisionCode = Literal["allowed", "not_allowlisted", "approval_required", "approval_invalid", "rate_limited"]
+DecisionCode = Literal[
+    "allowed", "not_allowlisted", "denied_by_rule", "approval_required", "approval_invalid", "rate_limited"
+]
 
 
 @dataclass(frozen=True)
@@ -248,12 +250,19 @@ class PolicyEngine:
         allowlist: frozenset[str],
         arguments: dict[str, Any],
         approval_token: str | None,
+        needs_approval: bool | None = None,
+        denied: str | None = None,
     ) -> Decision:
+        """Allowlist first, then the approval policy's answer when the gateway passes one
+        (``denied``: the reason a rule refuses the call; ``needs_approval``: whether a token is
+        required), else this tool policy's ``require_approval`` levels."""
         if tool not in allowlist:  # deny-first
             return Decision(
                 False, "not_allowlisted", risk, detail=f"{tool} is not on this session's allowlist"
             )
-        if not self.requires_approval(risk):
+        if denied is not None:
+            return Decision(False, "denied_by_rule", risk, detail=denied)
+        if not (self.requires_approval(risk) if needs_approval is None else needs_approval):
             return Decision(True, "allowed", risk)
         if not approval_token:
             return Decision(

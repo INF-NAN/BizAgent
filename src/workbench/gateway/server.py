@@ -3,10 +3,13 @@
 Clients connect to ``/mcp`` and identify their session with the ``X-Workbench-Session``
 header. ``list_tools`` returns the session's allowlisted tools with ``<scenario>__`` prefixes;
 ``call_tool`` goes through Gateway.call_tool (policy, rate limit, audit, normalization).
-Write/destructive tools need a one-time token in ``X-Approval-Token`` issued by the
-application layer (``POST /admin/approvals`` here, or the API's approval flow). Every token is
+Calls the approval policy sends to a person (write and destructive, unless a rule says otherwise;
+ADR-030) need a one-time token in ``X-Approval-Token`` issued by the application layer
+(``POST /admin/approvals`` here, or the API's approval flow); for an ``auto_approve`` rule the
+gateway issues the token itself. Every human token is
 bound to a preview (ADR-029): ``POST /admin/previews`` runs one and returns its record, and
-``/admin/approvals`` takes its ``preview_id`` or runs the preview itself before issuing.
+``/admin/approvals`` takes its ``preview_id`` or runs the preview itself before issuing, and
+refuses (409) a call the approval policy denies (ADR-030).
 
 MCP SDK 1.26.0 facts used (docs/RECON.md): lowlevel ``Server.call_tool(validate_input=...)``
 (mcp/server/lowlevel/server.py:492) accepts a returned ``CallToolResult`` as-is (:539-540);
@@ -142,7 +145,12 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
 
     async def approve(request: Request) -> JSONResponse:
         req = ApprovalRequest.model_validate(await request.json())
+        record = None
         try:
+            verdict = gateway.approval_verdict(req.session_id, req.tool, req.arguments)
+            if verdict.decision == "deny":  # nobody can approve it, so do not run a preview (ADR-030)
+                reason = f"the approval policy refuses this call ({verdict.reason}); nobody can approve it"
+                return JSONResponse({"error": reason, "policy": verdict.as_dict()}, status_code=409)
             record = (
                 None if req.preview_id else await gateway.preview(req.session_id, req.tool, req.arguments)
             )

@@ -25,6 +25,9 @@ approval:
   require_preview: {write: false, destructive: true}
   preview_timeout_s: 30          # 5x the slowest measured total on official e_commerce_33, rounded up
   preview_max_rows: 20           # rows per table shown on the card; the comparison uses every key
+  # Ordered rules deciding auto_approve / require_human / deny per call; checked when the gateway
+  # starts (ADR-030). Without a matching rule, write and destructive calls need a person.
+  policy_file: configs/approval_policy.yaml
 llm:
   backend: mock_replay           # mock_replay | vllm | openai_compat
   model: Snowflake/Arctic-AWM-4B

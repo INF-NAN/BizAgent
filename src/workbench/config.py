@@ -88,6 +88,9 @@ class ApprovalSettings(BaseModel):
     preview_timeout_s: float = Field(default=30.0, gt=0)
     # Rows per table and kind shown on the approval card; the comparison always uses every key.
     preview_max_rows: int = Field(default=20, ge=1)
+    # Ordered approval rules (auto_approve / require_human / deny), validated when the gateway
+    # starts (ADR-030). None: no rules, so write and destructive calls need a person.
+    policy_file: Path | None = None
 
 
 class LLMSettings(BaseModel):

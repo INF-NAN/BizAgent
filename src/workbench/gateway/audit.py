@@ -76,6 +76,9 @@ class AuditRecord:
     # preview_unavailable / check_failed, the differences and the ignored columns)
     preview: dict[str, Any] | None = None
     preview_check: dict[str, Any] | None = None
+    # the approval policy's answer (ADR-030): decision, the deciding rule id (None: the default
+    # applied), reason, and the destructive guard when it skipped an auto_approve rule
+    policy: dict[str, Any] | None = None
 
 
 class AuditLogger:

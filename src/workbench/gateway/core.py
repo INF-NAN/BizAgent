@@ -8,11 +8,17 @@ Approval previews (ADR-029): ``preview`` runs a write/destructive call in a shad
 ``issue_approval`` binds the token to that preview's digest, or to ``preview_unavailable`` when
 the risk level allows approving without one (``approval.require_preview``); an approved call is
 measured (checkpoint before, changes after) and compared with its preview in the audit line.
+
+Approval policy (ADR-030): before the tool policy's token check, ``approval_policy`` decides per
+call — ``deny`` refuses it, ``require_human`` needs a person's token, ``auto_approve`` lets the
+gateway issue the token itself (approver ``policy:<rule>``, bound to ``preview_unavailable``, no
+preview; owner decision D32). Destructive calls are never approved on the policy's behalf.
 """
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 import uuid
@@ -25,6 +31,7 @@ from workbench.config import ApprovalSettings, GatewaySettings
 from workbench.envs.changes import compare
 from workbench.envs.changes import digest as changes_digest
 from workbench.envs.changes import summary as changes_summary
+from workbench.gateway.approval_policy import GUARD, ApprovalPolicy, Verdict
 from workbench.gateway.audit import AuditLogger, AuditRecord, redact, summarize
 from workbench.gateway.errors import GatewayError, NormalizedResult, normalize
 from workbench.gateway.policy import (
@@ -51,6 +58,7 @@ from workbench.gateway.upstream import (
 SEP = "__"
 CallStatus = Literal["ok", "empty", "error", "denied"]
 PREVIEWS_KEPT = 256  # preview records kept in memory for binding and comparison
+POLICY_APPROVER = "policy:"  # approver prefix of tokens the gateway issues for auto_approve rules
 
 
 class PreviewBackend(Protocol):
@@ -118,6 +126,8 @@ class CallOutcome:
     # approved calls only: the preview binding and how the real changes compared with it
     preview: dict[str, Any] | None = None
     preview_check: dict[str, Any] | None = None
+    # the approval policy's answer: decision, the deciding rule (None: default), reason, guard
+    policy: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +142,7 @@ class CallOutcome:
             "duration_ms": round(self.duration_ms, 1),
             "preview": self.preview,
             "preview_check": self.preview_check,
+            "policy": self.policy,
         }
 
 
@@ -155,9 +166,14 @@ class Gateway:
         on_call: Callable[[CallOutcome], None] | None = None,
         approval: ApprovalSettings | None = None,
         previews: PreviewBackend | None = None,
+        approval_policy: ApprovalPolicy | None = None,
     ) -> None:
         self.settings = settings
         self.approval_settings = approval or ApprovalSettings()
+        if approval_policy is None:  # the file is validated here, so a bad policy stops startup
+            file = self.approval_settings.policy_file
+            approval_policy = ApprovalPolicy.load(file) if file is not None else ApprovalPolicy.empty()
+        self.approval_policy = approval_policy
         self.previews = previews
         self._preview_records: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.policy_config = policy or PolicyConfig.load(settings.policy_file)
@@ -227,16 +243,39 @@ class Gateway:
         route = self.route(session_id)
         return [
             {
-                **t.as_dict(self.policy.requires_approval(t.classification.level)),
+                **t.as_dict(self.needs_approval(t.classification.level)),
                 "allowlisted": name in route.allowlist,
             }
             for name, t in sorted(route.tools.items())
         ]
 
+    def needs_approval(self, risk: str) -> bool:
+        """The default for a risk level: write and destructive always (ADR-030); read only if the
+        tool policy's ``require_approval`` lists it. The approval policy's rules decide per call."""
+        return risk in ("write", "destructive") or risk in self.policy_config.require_approval
+
     def requires_approval(self, session_id: str, prefixed: str) -> bool:
+        """Whether the tool needs approval by default (tool listings); calls use approval_verdict."""
         _, tool = split_name(prefixed)
         gt = self.route(session_id).tools.get(tool)
-        return gt is not None and self.policy.requires_approval(gt.classification.level)
+        return gt is not None and self.needs_approval(gt.classification.level)
+
+    def approval_verdict(self, session_id: str, prefixed: str, arguments: dict[str, Any]) -> Verdict:
+        """The approval policy's answer for this exact call (the agent routes by it; call_tool
+        enforces the same answer). A name that is not a tool of this session is left to call_tool."""
+        route = self.route(session_id)
+        scenario, tool = split_name(prefixed)
+        gt = route.tools.get(tool)
+        if scenario != route.scenario or gt is None:
+            return Verdict("allow", None, "not a tool of this session", "unknown", False)
+        risk = gt.classification.level
+        return self.approval_policy.evaluate(
+            scenario=route.scenario,
+            tool=tool,
+            risk=risk,
+            arguments=arguments,
+            needs_approval=self.needs_approval(risk),
+        )
 
     # ------------------------------------------------------------------ approval previews
     def attach_previews(self, backend: PreviewBackend) -> None:
@@ -352,6 +391,11 @@ class Gateway:
         _, tool = split_name(prefixed)
         gt = route.tools.get(tool)
         risk = gt.classification.level if gt is not None else self.policy_config.unknown_default
+        verdict = self.approval_verdict(session_id, prefixed, arguments)
+        if verdict.decision == "deny":
+            raise ApprovalError(
+                f"the approval policy refuses this call ({verdict.reason}); nobody can approve it"
+            )
         if preview is None and preview_id is not None:
             preview = self._preview_records.get(preview_id)
         record = self._verified(session_id, prefixed, arguments, preview)
@@ -405,11 +449,12 @@ class Gateway:
                 }
         measured = changes_summary(actual) if actual is not None else None
         if grant.preview == PREVIEW_UNAVAILABLE:
-            return {
-                "result": "preview_unavailable",
-                "reason": "approved without a successful preview",
-                "actual": measured,
-            }
+            if grant.approver.startswith(POLICY_APPROVER):  # auto_approve: no preview by design (D32)
+                rule = grant.approver.removeprefix(POLICY_APPROVER)
+                reason = f"auto-approved by approval policy rule {rule}; no preview is run"
+            else:
+                reason = "approved without a successful preview"
+            return {"result": "preview_unavailable", "reason": reason, "actual": measured}
         record = self._preview_records.get(grant.preview_id or "")
         if record is None or record.get("digest") != grant.preview:
             return {
@@ -455,6 +500,7 @@ class Gateway:
                 duration_ms=round(outcome.duration_ms, 1),
                 preview=outcome.preview,
                 preview_check=redact(outcome.preview_check),
+                policy=outcome.policy,
             )
         )
         if self._on_call:
@@ -481,6 +527,20 @@ class Gateway:
             )
             return self._error(trace, prefixed, err, decision="unknown_tool")
         risk = gt.classification.level
+        verdict = self.approval_policy.evaluate(
+            scenario=route.scenario,
+            tool=tool,
+            risk=risk,
+            arguments=args,
+            needs_approval=self.needs_approval(risk),
+        )
+        if verdict.decision == "auto_approve" and verdict.needs_token and token is None:
+            if risk == "destructive":  # the hard guard, whatever evaluate() answered (ADR-030)
+                verdict = dataclasses.replace(
+                    verdict, decision="require_human", reason=f"{verdict.reason}; {GUARD}", guard=GUARD
+                )
+            else:  # the policy approves on its own behalf: no preview, preview_unavailable (D32)
+                token = self.approvals.issue(route.session_id, tool, args, f"{POLICY_APPROVER}{verdict.rule}")
         decision = self.policy.decide(
             session_id=route.session_id,
             tool=tool,
@@ -488,13 +548,21 @@ class Gateway:
             allowlist=route.allowlist,
             arguments=args,
             approval_token=token,
+            needs_approval=verdict.needs_token,
+            denied=verdict.reason if verdict.decision == "deny" else None,
         )
+        policy = verdict.as_dict()
         if not decision.allowed:
-            hints = (
-                ["ask the user to approve this action first"] if decision.code == "approval_required" else []
+            detail, hints = decision.detail, []
+            if decision.code == "approval_required":
+                detail = f"{detail} ({verdict.reason})"
+                hints = ["ask the user to approve this action first"]
+            elif decision.code == "denied_by_rule":
+                hints = ["the approval policy refuses this call and nobody can approve it; do not retry"]
+            err = GatewayError(f"policy_{decision.code}", detail, hints)
+            return self._error(
+                trace, prefixed, err, status="denied", risk=risk, decision=decision.code, policy=policy
             )
-            err = GatewayError(f"policy_{decision.code}", decision.detail, hints)
-            return self._error(trace, prefixed, err, status="denied", risk=risk, decision=decision.code)
         ok, retry_after = self.limiter.check(route.session_id, tool)
         if not ok:
             err = GatewayError(
@@ -503,15 +571,20 @@ class Gateway:
                 [f"retry after {retry_after:.1f}s"],
                 retryable=True,
             )
-            return self._error(trace, prefixed, err, status="denied", risk=risk, decision="rate_limited")
+            return self._error(
+                trace, prefixed, err, status="denied", risk=risk, decision="rate_limited", policy=policy
+            )
         grant = decision.grant
         if grant is None:
-            return await self._upstream(route, prefixed, tool, gt, args, decision, trace)
+            outcome = await self._upstream(route, prefixed, tool, gt, args, decision, trace)
+            outcome.policy = policy
+            return outcome
         # an approved call: measure what it changes and compare it with the approved preview
         checkpoint, failed = await self._checkpoint(route.session_id)
         outcome = await self._upstream(route, prefixed, tool, gt, args, decision, trace)
         outcome.preview = {"binding": grant.preview, "id": grant.preview_id}
         outcome.preview_check = await self._check_preview(route.session_id, grant, checkpoint, failed)
+        outcome.policy = policy
         return outcome
 
     async def _upstream(
