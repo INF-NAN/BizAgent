@@ -169,6 +169,8 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         pending = (await c.get("/approvals")).json()
         assert pending[0]["approval_id"] == sid and pending[0]["tool"].endswith("add_item_to_cart")
         assert pending[0]["preview"]["digest"] == preview["digest"]
+        # and the approval policy's answer: no rule matched, so a write goes to a person (ADR-030)
+        assert (pending[0]["policy"]["decision"], pending[0]["policy"]["rule"]) == ("require_human", None)
         # a new message while an approval is pending is refused
         assert (await c.post(f"/sessions/{sid}/messages", json={"content": "hi"})).status_code == 409
 

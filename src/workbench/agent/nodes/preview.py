@@ -19,6 +19,8 @@ def make_preview(deps: AgentDeps) -> Node:
         sid = state["session_id"]
         pc = state["pending_call"]
         assert pc is not None
+        if pc["risk"] == "read":  # a read an approval rule sends to a person changes no rows (ADR-030)
+            return {"pending_call": {**pc, "preview": None}, "next": "approve"}
         record = await deps.gateway.preview(sid, pc["name"], pc["arguments"])
         deps.hub.emit(
             sid,
