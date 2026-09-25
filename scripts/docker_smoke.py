@@ -2,8 +2,10 @@
 """Docker smoke test (Phase 14, owner decision D15; runs in .github/workflows/docker-smoke.yml).
 
 Builds the compose stack, starts it WITHOUT the gpu profile, drives the mock demo over the HTTP
-API (query -> write -> approval -> done), prints image sizes and the cold-start time, and stops
-the stack. Standard library only, so it runs on a bare CI runner.
+API (query -> write -> preview + approval -> done), prints image sizes and the cold-start time,
+and stops the stack. The approval request must carry the preview diff (a shadow environment in
+the env-manager container, ADR-029) and the approved write must match it. Standard library only,
+so it runs on a bare CI runner.
 
 The stack needs no edits for this: the image already contains tests/fixtures, compose mounts
 ./data and reads an optional ./.env. The script copies the hand-written mini dataset to
@@ -114,6 +116,13 @@ def api_flow(base: str) -> list[str]:
     calls = ", ".join(f"{e['tool']} -> {e['status']}" for e in reads)
     out.append(f"query: {calls}")
     out.append(f"write paused for approval: {last.get('tool')} (risk {last.get('risk')})")
+    # the approval card carries the preview diff: the rows the call will change (ADR-029)
+    preview = last.get("preview") or {}
+    added = (((preview.get("changes") or {}).get("tables") or {}).get("cart_items") or {}).get("added") or []
+    if preview.get("status") != "ok" or [a.get("row", {}).get("product_offer_id") for a in added] != [11]:
+        raise SmokeError(f"expected a preview adding one cart_items row for offer 11, got {preview}")
+    total_ms = (preview.get("timings_ms") or {}).get("total")
+    out.append(f"preview (shadow env in the env-manager): {preview.get('summary')}, {total_ms} ms")
 
     status, body = http("GET", f"{base}/approvals")
     pending = json.loads(body) if status == 200 else []
@@ -127,6 +136,10 @@ def api_flow(base: str) -> list[str]:
     writes = [e for e in events if e.get("type") == "tool_call"]
     calls = ", ".join(f"{e['tool']} -> {e['status']}" for e in writes)
     out.append(f"approved by ci-docker-smoke: {calls}")
+    checks = [(e.get("preview_check") or {}).get("result") for e in writes]
+    if checks != ["match"]:
+        raise SmokeError(f"expected the approved write to match its preview, got {checks}")
+    out.append("preview check of the approved write: match")
     out.append(f"done: {events[-1].get('final_answer')!r}")
 
     status, body = http("GET", f"{base}/sessions/{sid}/diff")

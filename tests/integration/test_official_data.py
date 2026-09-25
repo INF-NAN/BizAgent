@@ -173,3 +173,35 @@ def test_http_method_floor_on_official_routes() -> None:
         if method in METHOD_FLOOR and classify(tool, "", policy, scenario, http_method=method).level == "read"
     ]
     assert graded_read == []
+
+
+async def test_preview_of_an_official_write_matches_and_ignores_time_columns(
+    official: EnvManager, tmp_path: Path
+) -> None:
+    """ADR-029 on official e_commerce_33: the server stamps time columns with datetime.utcnow(), so a
+    preview and the real call differ there; the structural comparison records and skips them."""
+    from workbench.config import ApprovalSettings, GatewaySettings
+    from workbench.envs.service import LocalEnvService
+    from workbench.gateway.core import Gateway
+    from workbench.gateway.policy import ApprovalService
+
+    h = await official.start(SCENARIO, session_id="off4")
+    gateway = Gateway(
+        GatewaySettings(audit_path=tmp_path / "audit.jsonl"),
+        approvals=ApprovalService(secret=b"k"),
+        approval=ApprovalSettings(preview_timeout_s=60),
+        previews=LocalEnvService(official),
+    )
+    await gateway.register_session("off4", SCENARIO, h.url)
+    tool, args = f"{SCENARIO}__add_item_to_cart", {"product_offer_id": 1, "quantity": 1}
+    record = await gateway.preview("off4", tool, args)
+    assert record["status"] == "ok" and record["call"]["is_error"] is False, record
+    assert "cart_items" in record["changes"]["tables"]
+    assert not official.diff("off4").is_changed  # the official session DB is untouched by the preview
+    token = gateway.issue_approval("off4", tool, args, "alice", preview=record)
+    out = await gateway.call_tool("off4", tool, args, approval_token=token)
+    check = out.preview_check
+    assert out.status == "ok" and check is not None and check["result"] == "match", check
+    # the new row's created_at/updated_at differ between the two runs: recorded, not compared
+    assert check["ignored_columns"] == {"cart_items": ["created_at", "updated_at"]}, check
+    assert (check["preview"], check["actual"]) == ("cart_items +1", "cart_items +1")
