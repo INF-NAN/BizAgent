@@ -51,16 +51,17 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `README.md` | 项目说明（英文摘要 + 中文正文） |
 | `docs/RECON.md` | 上游侦察报告，记录全部"文件:行号" |
 | `docs/UPSTREAM.md` | 本文件 |
-| `docs/DECISIONS.md` | ADR-001 至 ADR-013 |
+| `docs/DECISIONS.md` | ADR-001 至 ADR-027 |
 | `docs/ARCHITECTURE.md` | 分层图与审批写操作时序图 |
 | `docs/WALKTHROUGH.md` | 学习路线 |
 | `docs/LIMITATIONS.md` | 未验证项与已知限制 |
 | `docs/RESULTS.md` | 由 registry 自动生成，勿手改 |
 | `docs/CHANGELOG.md` | prompt 版本变更记录 |
 | `docs/IDEAS.md` | 范围外想法（R13） |
+| `docs/runbooks/phase15-gpu.md` | Phase 15 GPU runbook：15A 推理链路、15B smoke 训练、回贴与脱敏要求（仓库主人在自己的 GPU 机器上执行，UNVERIFIED-LOCAL） |
 | `results/registry.yaml` | 论文数字登记（数值来自论文，结构由本仓库维护） |
 | `pyproject.toml`、`uv.lock` | app 环境 |
-| `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，不在 CI 安装） |
+| `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，不在 CI 安装）；flash-attn 的构建环境使用锁定的 torch（ADR-027） |
 | `Makefile` | 开发入口 |
 | `.pre-commit-config.yaml`、`.secrets.baseline` | ruff、detect-secrets、submodule 干净检查 |
 | `.github/workflows/ci.yml` | CI（lint、test、check-numbers） |
@@ -77,11 +78,13 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `scripts/serve_vllm.sh` | vLLM 启动脚本（UNVERIFIED-LOCAL） |
 | `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright） |
 | `scripts/docker_smoke.py` | Docker 冒烟脚本（只用标准库；测量镜像大小与冷启动耗时） |
+| `scripts/redact_paste.py` | Phase 15 回贴内容的脱敏脚本（N1；邮箱、卡号、电话沿用网关审计规则） |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
-| `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019） |
+| `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-019）与训练环境白名单（ADR-026） |
+| `src/workbench/verify.py` | `workbench verify`：不给 key 地运行 `awm verify`，sql 模式的裁判经本地代理（ADR-025） |
 | `src/workbench/envs/*.py` | 环境管理：端口、快照与 diff、健康检查、场景目录、AWM 适配、进程组管理、env-manager 服务 |
 | `src/workbench/gateway/*.py` | MCP 网关：策略、限流、审计、错误归一、上游连接、核心、server |
-| `src/workbench/llm/**` | LLM 客户端：类型、错误、`<tool_call>` 解析、mock replay 与 OpenAI 兼容后端、vLLM 命令生成 |
+| `src/workbench/llm/**` | LLM 客户端：类型、错误、`<tool_call>` 解析、mock replay 与 OpenAI 兼容后端、vLLM 命令生成；`workbench serve probe` 的两个探针（U1） |
 | `src/workbench/agent/**` | LangGraph 智能体：状态、守卫、记忆、prompt（版本化）、节点、图、runner |
 | `src/workbench/api/*.py` | HTTP API、SSE、schema |
 | `src/workbench/obs/*.py` | trace（JSONL）与 Prometheus 指标 |

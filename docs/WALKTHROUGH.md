@@ -175,6 +175,17 @@ vllm serve Snowflake/Arctic-AWM-4B --host 127.0.0.1 --port 8000 --served-model-n
 
 在 GPU 机器上运行 `scripts/serve_vllm.sh`，然后设置 `WORKBENCH_LLM__BACKEND=vllm`（UNVERIFIED-LOCAL：需要 CUDA GPU 和 `huggingface.co` 访问）。
 
+服务起来之后，可以先用探针看服务怎样处理两类工具调用请求（各发 1 个请求，不是评测）：
+
+```bash
+workbench serve probe       # 默认连 llm.base_url 与 llm.model
+```
+
+- `native`：智能体 act 步骤的请求（原生 `tools`、流式），报告服务返回的是原生 `tool_calls`，还是只能靠文本解析兜底；
+- `text`：`awm agent` 的第一个请求，由 AWM 自己的代码发出、不带 `tools`，检查 `<tool_call>` 文本是否原样留在 `content` 里。
+
+在 GPU 机器上从零开始的逐条步骤、预期输出和回贴要求见 [docs/runbooks/phase15-gpu.md](runbooks/phase15-gpu.md)。
+
 ### 3.1 OpenAI 兼容端点：DeepSeek（单次链路演示，不构成评测）
 
 后端只用环境变量配置，key 只从 `DEEPSEEK_API_KEY` 读取，不写入任何文件：

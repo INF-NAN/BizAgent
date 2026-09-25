@@ -64,6 +64,7 @@ GitHub Actions 的 docker-smoke 任务在每次 push 到 `phase9-verification` �
 ## GPU 部署路径（UNVERIFIED-LOCAL）
 
 以下步骤需要 CUDA GPU 与 `huggingface.co` 访问，本仓库的开发沙箱无法验证（见 [docs/LIMITATIONS.md](docs/LIMITATIONS.md)）。
+从零开始的逐条命令、预期输出与回贴要求（含国内镜像站用法）见 [docs/runbooks/phase15-gpu.md](docs/runbooks/phase15-gpu.md)。
 
 1. 数据：`make data`（下载 AgentWorldModel-1K 到 `data/awm1k/`，不入库；CC-BY-4.0，使用时请署名）。
 2. 模型服务：`scripts/serve_vllm.sh`（参数来自 `configs/serving/arctic-awm-4b.yaml`，可先用 `uv run workbench serve vllm-cmd` 查看）。
