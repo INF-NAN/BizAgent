@@ -85,6 +85,7 @@ def test_synth_run_dry_run_with_scenario_file(tmp_path) -> None:  # type: ignore
 
 
 MINI = ["--dataset-dir", "tests/fixtures/awm_mini", "--scenario", "mini_e_commerce"]
+DEMO_POLICY = ["--policy", "configs/approval_policy.demo.yaml"]  # one rule of each decision (D34)
 
 
 def flat(output: str) -> str:
@@ -93,19 +94,47 @@ def flat(output: str) -> str:
 
 def test_gateway_policy_test_explains_each_rule_and_the_decision() -> None:
     args = '{"product_offer_id": 11, "quantity": 1}'
-    r = runner.invoke(app, ["gateway", "policy", "test", *MINI, "--tool", "add_item_to_cart", "--args", args])
+    add = ["--tool", "add_item_to_cart", "--args", args]
+    r = runner.invoke(app, ["gateway", "policy", "test", *DEMO_POLICY, *MINI, *add])
     assert r.exit_code == 0, r.output
     out = flat(r.output)
-    assert "policy: configs/approval_policy.yaml (3 rules)" in out
+    assert "policy: configs/approval_policy.demo.yaml (3 rules)" in out
     assert "risk: write (heuristic: verb 'add' => write)" in out
     assert "quantity=1 fails gt 5" in out  # every rule is listed with why it did not match
     assert "decision: require_human (default) - no rule matched: write calls need a human by default" in out
     assert "means: a person approves it on the approval card, after a preview (ADR-029)" in out
 
     pm_args = ["--tool", "delete_user_payment_method", "--args", '{"payment_method_id": 2}']
-    pm = runner.invoke(app, ["gateway", "policy", "test", *MINI, *pm_args])
+    pm = runner.invoke(app, ["gateway", "policy", "test", *DEMO_POLICY, *MINI, *pm_args])
     assert pm.exit_code == 0 and "decision: deny (rule no-payment-method-deletion)" in flat(pm.output)
     assert "means: refused; nobody can approve it" in flat(pm.output)
+
+
+def test_gateway_policy_test_the_default_policy_auto_approves_nothing() -> None:
+    """The official-scenario call the demo policy auto-approves goes to a person under the default
+    policy, which configs/app.yaml selects when --policy is not given (owner decision D34)."""
+    args = '{"product_offer_id": 1, "quantity": 2}'
+    call = ["--tool", "e_commerce_33__add_item_to_cart", "--risk", "write", "--args", args]
+    demo = runner.invoke(app, ["gateway", "policy", "test", *DEMO_POLICY, *call])
+    assert demo.exit_code == 0, demo.output
+    assert "decision: auto_approve (rule small-cart-add-official)" in flat(demo.output)
+    default = runner.invoke(app, ["gateway", "policy", "test", *call])
+    assert default.exit_code == 0, default.output
+    out = flat(default.output)
+    assert "policy: configs/approval_policy.yaml (2 rules)" in out
+    assert "decision: require_human (default) - no rule matched: write calls need a human by default" in out
+
+
+def test_demo_mode_uses_the_demo_approval_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    from workbench.cli import demo_settings
+
+    monkeypatch.delenv("WORKBENCH_APPROVAL__POLICY_FILE", raising=False)
+    assert demo_settings().approval.policy_file == Path("configs/approval_policy.demo.yaml")
+    # a policy file set in the environment still wins, so a temporary policy can be tried on the demo
+    monkeypatch.setenv("WORKBENCH_APPROVAL__POLICY_FILE", "/tmp/demo-policy.yaml")
+    assert demo_settings().approval.policy_file == Path("/tmp/demo-policy.yaml")
 
 
 def test_gateway_policy_test_auto_approve_and_the_destructive_guard(tmp_path) -> None:  # type: ignore[no-untyped-def]

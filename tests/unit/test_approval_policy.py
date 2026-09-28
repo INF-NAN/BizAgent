@@ -9,8 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from workbench.gateway.approval_policy import ApprovalPolicy, ApprovalPolicyError, Verdict
+
+DEFAULT = Path("configs/approval_policy.yaml")  # configs/app.yaml: approval.policy_file
+DEMO = Path("configs/approval_policy.demo.yaml")  # make demo-mock, docker smoke (owner decision D34)
 
 
 def policy(*rules: dict[str, Any]) -> ApprovalPolicy:
@@ -199,13 +203,36 @@ def test_schema_errors(tmp_path: Path, text: str, problem: str) -> None:
     assert problem in str(err.value)
 
 
-def test_the_shipped_policy_loads_and_keeps_the_demo_call_for_a_person() -> None:
-    p = ApprovalPolicy.load(Path("configs/approval_policy.yaml"))
-    assert [r.id for r in p.rules] == [
-        "no-payment-method-deletion",
-        "bulk-cart-add-needs-human",
-        "small-cart-add-official",
+def test_the_default_policy_auto_approves_nothing() -> None:
+    """The shipped default is the most conservative policy (owner decision D34): every write goes to a
+    person. The auto_approve rule is a commented-out example that an administrator must switch on."""
+    p = ApprovalPolicy.load(DEFAULT)
+    assert [(r.id, r.decision) for r in p.rules] == [
+        ("no-payment-method-deletion", "deny"),
+        ("bulk-cart-add-needs-human", "require_human"),
     ]
+    official = decide(
+        p, "add_item_to_cart", "write", scenario="e_commerce_33", product_offer_id=1, quantity=2
+    )
+    assert (official.decision, official.rule, official.needs_token) == ("require_human", None, True)
+    # the example still loads, and uncommenting it gives exactly the demo policy
+    text = DEFAULT.read_text(encoding="utf-8")
+    assert "自动放行需由管理员显式开启" in text
+    lines = text.splitlines()
+    block: list[str] = []
+    for line in lines[lines.index("  # - id: small-cart-add-official") :]:
+        if not line.startswith("  # "):
+            break
+        block.append(line.removeprefix("  # "))
+    example = yaml.safe_load("\n".join(block))
+    assert policy(*example).rules[0].decision == "auto_approve"
+    demo_rules = yaml.safe_load(DEMO.read_text(encoding="utf-8"))["rules"]
+    assert yaml.safe_load(text)["rules"] + example == demo_rules
+
+
+def test_the_demo_policy_shows_each_decision_and_keeps_the_demo_call_for_a_person() -> None:
+    p = ApprovalPolicy.load(DEMO)
+    assert [r.decision for r in p.rules] == ["deny", "require_human", "auto_approve"]
     demo = decide(p, "add_item_to_cart", "write", scenario="mini_e_commerce", product_offer_id=11, quantity=1)
     assert (demo.decision, demo.rule) == ("require_human", None)  # the demo still shows the approval card
     official = decide(

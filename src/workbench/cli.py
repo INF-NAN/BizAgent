@@ -47,6 +47,8 @@ for sub, name in [
     app.add_typer(sub, name=name)
 
 console = Console()
+# `api serve --demo` uses this approval policy: one rule of each decision (owner decision D34)
+DEMO_APPROVAL_POLICY = Path("configs/approval_policy.demo.yaml")
 
 
 def _not_implemented(phase: int) -> None:
@@ -519,10 +521,20 @@ def _print_event(e: dict[str, Any]) -> None:
 
 
 def demo_settings() -> Settings:
-    """Offline demo: hand-written mini scenario + scripted mock LLM (query -> write -> approve)."""
+    """Offline demo: hand-written mini scenario + scripted mock LLM (query -> write -> approve).
+
+    The approval policy is the demo one, with one rule of each decision (owner decision D34); the
+    default policy auto-approves nothing. WORKBENCH_APPROVAL__POLICY_FILE, set in the process
+    environment, still picks another file.
+    """
+    import os
+
     from workbench.config import Settings
 
     root = Path("data/demo")
+    approval: dict[str, Any] = {}
+    if "WORKBENCH_APPROVAL__POLICY_FILE" not in os.environ:
+        approval = {"approval": {"policy_file": DEMO_APPROVAL_POLICY}}
     return Settings(
         env={"dataset_dir": Path("tests/fixtures/awm_mini"), "runs_dir": root / "runs"},  # type: ignore[arg-type]
         gateway={"audit_path": root / "audit.jsonl"},  # type: ignore[arg-type]
@@ -532,12 +544,15 @@ def demo_settings() -> Settings:
             "mock_reset_per_session": True,
         },
         agent={"checkpoint_db": root / "checkpoints.sqlite", "memory_db": root / "memory.sqlite"},  # type: ignore[arg-type]
+        **approval,
     )
 
 
 @api_app.command("serve")
 def api_serve(
-    demo: bool = typer.Option(False, "--demo", help="offline mock demo on the mini scenario"),
+    demo: bool = typer.Option(
+        False, "--demo", help="offline mock demo on the mini scenario, with the demo approval policy"
+    ),
 ) -> None:
     """Run the HTTP API (+ gateway MCP at /gateway/mcp, UI at /ui/)."""
     import uvicorn
@@ -548,7 +563,7 @@ def api_serve(
     if demo:
         console.print(
             f"[bold]demo mode[/]: open http://{settings.api.host}:{settings.api.port}/ui/ "
-            "and pick scenario mini_e_commerce"
+            f"and pick scenario mini_e_commerce (approval policy: {settings.approval.policy_file})"
         )
     uvicorn.run(create_app(settings), host=settings.api.host, port=settings.api.port)
 

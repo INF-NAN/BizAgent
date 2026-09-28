@@ -3,20 +3,22 @@
 
 Builds the compose stack, starts it WITHOUT the gpu profile, drives the mock demo over the HTTP
 API (query -> write -> preview + approval -> done), prints image sizes and the cold-start time,
-and stops the stack. The approval request must carry the approval policy's decision (ADR-030) and
-the preview diff (a shadow environment in the env-manager container, ADR-029), and the approved
-write must match it. Standard library only, so it runs on a bare CI runner.
+and stops the stack. The API must run with the demo approval policy (one rule of each decision,
+owner decision D34; GET /healthz names it), the approval request must carry the policy's decision
+(ADR-030) and the preview diff (a shadow environment in the env-manager container, ADR-029), and the
+approved write must match it. Standard library only, so it runs on a bare CI runner.
 
-The stack needs no edits for this: the image already contains tests/fixtures, compose mounts
-./data and reads an optional ./.env. The script copies the hand-written mini dataset to
-./data/awm1k and writes a .env that selects the scripted mock LLM; it refuses to run if either
-already exists (a real dataset or a user's .env must never be overwritten) and removes both at
-the end. Full mode therefore needs a clean checkout without ./data (as on a CI runner).
+The stack needs no edits for this: the image already contains tests/fixtures and configs, compose
+mounts ./data and reads an optional ./.env. The script copies the hand-written mini dataset to
+./data/awm1k and writes a .env that selects the scripted mock LLM and the demo approval policy
+(configs/approval_policy.demo.yaml); it refuses to run if either already exists (a real dataset or
+a user's .env must never be overwritten) and removes both at the end. Full mode therefore needs a
+clean checkout without ./data (as on a CI runner).
 
 Engineering facts only (R3): sizes come from `docker image inspect`, times from time.monotonic().
 
     python3 scripts/docker_smoke.py                          # full run (needs Docker + Compose v2)
-    python3 scripts/docker_smoke.py --api-only http://HOST:PORT   # only the API flow
+    python3 scripts/docker_smoke.py --api-only http://HOST:PORT   # only the API flow (e.g. make demo-mock)
 """
 
 from __future__ import annotations
@@ -38,10 +40,12 @@ DATASET = ROOT / "data" / "awm1k"
 ENV_FILE = ROOT / ".env"
 API = "http://127.0.0.1:8080"
 SCENARIO = "mini_e_commerce"
+DEMO_POLICY = "configs/approval_policy.demo.yaml"
 REQUEST = "Add the best wireless noise cancelling headphones under $200 to my cart"
 ENV_LINES = (
     "WORKBENCH_LLM__MOCK_FIXTURE=tests/fixtures/trajectories/demo_query_write_approve.jsonl",
     "WORKBENCH_LLM__MOCK_RESET_PER_SESSION=true",
+    f"WORKBENCH_APPROVAL__POLICY_FILE={DEMO_POLICY}",
 )
 
 
@@ -95,6 +99,13 @@ def wait_healthy(url: str, timeout_s: float) -> None:
 def api_flow(base: str) -> list[str]:
     """Query -> write -> approval -> done over the HTTP API; returns summary lines."""
     out: list[str] = []
+    # the demo approval policy is in force: one rule of each decision (owner decision D34)
+    status, body = http("GET", f"{base}/healthz")
+    loaded = (json.loads(body) if status == 200 else {}).get("approval_policy") or {}
+    decisions = sorted(rule.rsplit(" (", 1)[-1].rstrip(")") for rule in loaded.get("rules") or [])
+    if loaded.get("file") != DEMO_POLICY or decisions != ["auto_approve", "deny", "require_human"]:
+        raise SmokeError(f"expected the demo approval policy {DEMO_POLICY} in GET /healthz, got {body[:300]}")
+    out.append(f"approval policy (GET /healthz): {loaded['file']}: {', '.join(loaded['rules'])}")
     t0 = time.monotonic()
     status, body = http("POST", f"{base}/sessions", {"scenario": SCENARIO})
     if status != 200:
@@ -116,7 +127,7 @@ def api_flow(base: str) -> list[str]:
     calls = ", ".join(f"{e['tool']} -> {e['status']}" for e in reads)
     out.append(f"query: {calls}")
     out.append(f"write paused for approval: {last.get('tool')} (risk {last.get('risk')})")
-    # the shipped approval policy has no rule for the mini demo call: the default sends it to a person
+    # no demo rule covers the mini demo call (auto_approve is for e_commerce_*): it goes to a person
     policy = last.get("policy") or {}
     if (policy.get("decision"), policy.get("rule")) != ("require_human", None):
         raise SmokeError(f"expected the default approval decision (require_human, no rule), got {policy}")

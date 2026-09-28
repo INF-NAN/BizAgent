@@ -102,6 +102,9 @@ class FakeEnvService:
         return cart_item_added()
 
 
+DEMO_POLICY = Path("configs/approval_policy.demo.yaml")
+
+
 def make_settings(tmp_path: Path, **api: Any) -> Settings:
     return Settings(
         env={"dataset_dir": Path("tests/fixtures/awm_mini"), "runs_dir": tmp_path / "runs"},  # type: ignore[arg-type]
@@ -121,6 +124,7 @@ def make_app(
         policy=PolicyConfig.load(Path("configs/tool_policy.yaml")),
         approvals=ApprovalService(secret=b"k"),
         upstream=MiniUpstream(),
+        approval=ApprovalSettings(policy_file=DEMO_POLICY),  # as in make demo-mock (D34)
     )
     llm = LLMClient(backend or MockReplayBackend(FIX / "demo_query_write_approve.jsonl"), settings.llm)
     rt = Runtime(settings, env_service=envs, gateway=gateway, llm=llm)
@@ -142,7 +146,16 @@ def sse_events(text: str) -> list[dict[str, Any]]:
 async def test_full_flow_over_http(tmp_path: Path) -> None:
     app, _, envs = make_app(tmp_path)
     async for c in lifespan_client(app):
-        assert (await c.get("/healthz")).json()["ok"] is True
+        health = (await c.get("/healthz")).json()
+        assert health["ok"] is True
+        assert health["approval_policy"] == {
+            "file": str(DEMO_POLICY),
+            "rules": [
+                "no-payment-method-deletion (deny)",
+                "bulk-cart-add-needs-human (require_human)",
+                "small-cart-add-official (auto_approve)",
+            ],
+        }
         scen = (await c.get("/scenarios")).json()
         assert scen[0]["name"] == "mini_e_commerce" and scen[0]["tools"] == 7
 
@@ -169,7 +182,7 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         pending = (await c.get("/approvals")).json()
         assert pending[0]["approval_id"] == sid and pending[0]["tool"].endswith("add_item_to_cart")
         assert pending[0]["preview"]["digest"] == preview["digest"]
-        # and the approval policy's answer: no rule matched, so a write goes to a person (ADR-030)
+        # and the approval policy's answer: no demo rule covers this call, so it goes to a person (ADR-030)
         assert (pending[0]["policy"]["decision"], pending[0]["policy"]["rule"]) == ("require_human", None)
         # a new message while an approval is pending is refused
         assert (await c.post(f"/sessions/{sid}/messages", json={"content": "hi"})).status_code == 409

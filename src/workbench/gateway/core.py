@@ -25,6 +25,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from workbench.config import ApprovalSettings, GatewaySettings
@@ -171,8 +172,11 @@ class Gateway:
     ) -> None:
         self.settings = settings
         self.approval_settings = approval or ApprovalSettings()
+        # the file the approval policy came from (None: passed in as an object, or no file configured)
+        self.approval_policy_file: Path | None = None
         if approval_policy is None:  # the file is validated here, so a bad policy stops startup
-            file = self.approval_settings.policy_file
+            self.approval_policy_file = self.approval_settings.policy_file
+            file = self.approval_policy_file
             approval_policy = ApprovalPolicy.load(file) if file is not None else ApprovalPolicy.empty()
         self.approval_policy = approval_policy
         self.previews = previews

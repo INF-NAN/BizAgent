@@ -230,7 +230,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
-        return {"ok": True, "sessions": len(rt.sessions), "llm_backend": settings.llm.backend}
+        policy_file = rt.gateway.approval_policy_file
+        return {
+            "ok": True,
+            "sessions": len(rt.sessions),
+            "llm_backend": settings.llm.backend,
+            # which approval policy is in force (ADR-030); the docker smoke test checks it
+            "approval_policy": {
+                "file": str(policy_file) if policy_file is not None else None,
+                "rules": [f"{r.id} ({r.decision})" for r in rt.gateway.approval_policy.rules],
+            },
+        }
 
     @app.get("/metrics")
     async def prometheus() -> Response:

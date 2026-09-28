@@ -1,0 +1,32 @@
+# Demo approval policy (ADR-030, owner decision D34): one rule of each decision. Used by
+# `make demo-mock` (workbench api serve --demo), the docker smoke test (scripts/docker_smoke.py) and
+# the tests. It is not the default: configs/approval_policy.yaml auto-approves nothing, and the
+# fields and decisions are documented there.
+#
+# The scripted mini demo (scenario mini_e_commerce, one unit added to the cart) matches none of these
+# rules, so it still goes to a person with a preview. The auto_approve rule only applies to the
+# official e-commerce scenarios (e_commerce_*); see what it does without running anything:
+#   uv run workbench gateway policy test --policy configs/approval_policy.demo.yaml \
+#     --tool e_commerce_33__add_item_to_cart --risk write --args '{"product_offer_id": 1, "quantity": 2}'
+version: 1
+rules:
+  - id: no-payment-method-deletion
+    description: Saved payment methods are never deleted by the agent.
+    tools: ["delete_*payment_method*"]
+    decision: deny
+
+  - id: bulk-cart-add-needs-human
+    description: Adding more than 5 units of one offer always goes to a person.
+    tools: [add_item_to_cart]
+    args:
+      quantity: {gt: 5}
+    decision: require_human
+
+  - id: small-cart-add-official
+    description: On the official e-commerce scenarios, adding up to 2 units is approved automatically.
+    scenarios: ["e_commerce_*"]
+    tools: [add_item_to_cart]
+    risk: [write]
+    args:
+      quantity: {lte: 2}
+    decision: auto_approve

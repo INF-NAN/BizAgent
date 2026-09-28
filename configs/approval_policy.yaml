@@ -1,6 +1,11 @@
 # Approval policy (Phase 18, ADR-030). Loaded when the gateway starts and validated against a schema:
 # an unknown field or a wrong type stops it with the YAML path of every problem.
 #
+# This is the default policy (configs/app.yaml: approval.policy_file). It is deliberately the most
+# conservative one and auto-approves nothing (owner decision D34): every write goes to a person.
+# configs/approval_policy.demo.yaml shows one rule of each decision; `make demo-mock`, the docker
+# smoke test and the tests use it. Point WORKBENCH_APPROVAL__POLICY_FILE at another file to switch.
+#
 # Rules are tried in order and the first match decides:
 #   auto_approve   the gateway approves on the policy's behalf: approver "policy:<id>", no preview, the
 #                  token is bound to preview_unavailable, the real change is still measured (D32)
@@ -38,11 +43,17 @@ rules:
       quantity: {gt: 5}
     decision: require_human
 
-  - id: small-cart-add-official
-    description: On the official e-commerce scenarios, adding up to 2 units is approved automatically.
-    scenarios: ["e_commerce_*"]
-    tools: [add_item_to_cart]
-    risk: [write]
-    args:
-      quantity: {lte: 2}
-    decision: auto_approve
+  # Example, not active. Auto-approval must be switched on explicitly by an administrator
+  # (自动放行需由管理员显式开启): an auto-approved call runs without a preview and without a person,
+  # and the official environments accept some bad writes (docs/LIMITATIONS.md §6: adding an offer
+  # that does not exist to the cart succeeds). Uncomment only after weighing that (ADR-030).
+  # tests/unit/test_approval_policy.py checks that this example still loads and matches the demo file.
+  #
+  # - id: small-cart-add-official
+  #   description: On the official e-commerce scenarios, adding up to 2 units is approved automatically.
+  #   scenarios: ["e_commerce_*"]
+  #   tools: [add_item_to_cart]
+  #   risk: [write]
+  #   args:
+  #     quantity: {lte: 2}
+  #   decision: auto_approve

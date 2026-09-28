@@ -173,9 +173,16 @@ def test_the_policy_file_is_validated_when_the_gateway_starts(tmp_path: Path) ->
     settings = GatewaySettings(audit_path=tmp_path / "audit.jsonl")
     with pytest.raises(ApprovalPolicyError, match=r"rules\[0\] \(id a\)\.tool: unknown field"):
         Gateway(settings, approval=ApprovalSettings(policy_file=bad))
-    shipped = Gateway(settings, approval=ApprovalSettings(policy_file=Path("configs/approval_policy.yaml")))
+    default = Path("configs/approval_policy.yaml")
+    shipped = Gateway(settings, approval=ApprovalSettings(policy_file=default))
     assert shipped.approval_policy.rules[0].id == "no-payment-method-deletion"
-    assert Gateway(settings).approval_policy.rules == []  # no file configured: no rules
+    assert shipped.approval_policy_file == default
+    # the default auto-approves nothing; the demo policy has one rule of each decision (D34)
+    assert "auto_approve" not in {r.decision for r in shipped.approval_policy.rules}
+    demo = Gateway(settings, approval=ApprovalSettings(policy_file=Path("configs/approval_policy.demo.yaml")))
+    assert [r.decision for r in demo.approval_policy.rules] == ["deny", "require_human", "auto_approve"]
+    none = Gateway(settings)
+    assert none.approval_policy.rules == [] and none.approval_policy_file is None  # no file: no rules
 
 
 async def test_admin_approvals_refuses_a_denied_call_without_running_a_preview(tmp_path: Path) -> None:
