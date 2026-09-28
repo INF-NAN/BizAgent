@@ -121,7 +121,7 @@ sequenceDiagram
 要点：
 
 - 被中断的 `approve` 节点在恢复时会重新执行，所以令牌在恢复后才签发（`agent/nodes/approve.py`）；预演也因此放在单独的 `preview` 节点，结果存进 checkpoint，只执行一次。
-- 审批策略（ADR-030）：act 先问网关这次调用的决策，只有 require_human 走上图的预演与审批；auto_approve 由网关以 `policy:<规则编号>` 自己签发令牌（不预演，执行后照常测量改动，D32）；deny 由网关直接拒绝。网关在每次调用时按同一策略执行，外部 MCP 客户端也不例外。
+- 审批策略（ADR-030）：act 先问网关这次调用的决策，只有 require_human 走上图的预演与审批；auto_approve 由网关以 `policy:<规则编号>` 自己签发令牌（不预演，执行后照常测量改动，D32）；deny 由网关直接拒绝。网关在每次调用时按同一策略执行，外部 MCP 客户端也不例外。默认策略 `configs/approval_policy.yaml` 不含 auto_approve 规则，演示与测试用 `configs/approval_policy.demo.yaml`（D34）。
 - 预演（ADR-029）：影子环境从会话**当前**数据库的副本启动，绝不写会话自己的数据库；有超时；结束后进程组、端口与目录全部回收。
 - 令牌与参数摘要、预演 digest 绑定：模型在审批后改动参数，网关会拒绝调用；预演未成功而该风险级别要求预演（`approval.require_preview`，默认 destructive）时不签发令牌，只能拒绝；不要求时令牌绑定 `preview_unavailable`，UI 标出"未预演"。
 - 真实执行后按结构比对实际改动与预演（表、主键、改动的列名；时间列只记录不比对），结果写入审计；不一致时记 `preview_mismatch`，UI 标出。

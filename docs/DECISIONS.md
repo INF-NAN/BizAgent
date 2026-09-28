@@ -742,6 +742,7 @@
     - 加载时做 schema 校验，出现未知字段即报错；新增 `workbench gateway policy test`；
     - 审计与 UI 记录并显示命中的规则编号。
   - 仓库主人的决定 D32：auto_approve 的 write 调用不跑预演，令牌绑定 `preview_unavailable`，批准人记为 `policy:<规则编号>`；执行后照常测量实际改动，与规则编号一起写入审计；require_human 的调用照常预演。
+  - 仓库主人的决定 D34（Phase 18 确认时）：默认策略不启用 auto_approve，演示与测试改用单独的演示策略文件；D36：同意下文"与任务书的偏差"中的三处。
   - 已有的能力：`tool_policy.yaml`（deny-first 允许清单、风险分级、`require_approval` 风险级别、限流）；一次性 HMAC 审批令牌（ADR-029 起绑定预演）；智能体按工具的风险级别决定是否进入审批。
 - **可选方案**：
   1. 扩展 `tool_policy.yaml`：与风险分级混在一起，也难以做严格的 schema 校验，否决；
@@ -782,19 +783,34 @@
     - 逐条列出每条规则是否命中及原因，以及 destructive 保护是否生效；
     - 说明该决策在运行时意味着什么；
     - 风险级别由 `--risk` 指定，或按 `gateway export-risk` 的方式离线分级。
-  - **默认策略文件**：
-    - 禁止删除已保存的支付方式（deny）；
-    - 单次加购超过 5 件交人工（require_human）；
-    - 官方 e-commerce 场景（`e_commerce_*`）中单次加购不超过 2 件自动批准（auto_approve）；
-    - 迷你演示场景的加购不命中任何规则，演示仍走审批卡片与预演。
+  - **默认策略文件**（D34）：`configs/approval_policy.yaml` 不自动批准任何调用。
+    - 规则只有两条：禁止删除已保存的支付方式（deny）；单次加购超过 5 件交人工（require_human）；
+    - "官方 e-commerce 场景（`e_commerce_*`）中单次加购不超过 2 件自动批准"（`small-cart-add-official`）只作为注释掉的示例留在文件里，注明"自动放行需由管理员显式开启"；
+    - 理由：
+      - 默认配置应当最保守：不改配置就部署的人，得到的应当是最严格的行为，放宽要由管理员显式决定；
+      - LIMITATIONS §6 已记录，官方环境 `e_commerce_33` 向购物车加入不存在的 offer ID 也会成功写入，网关只能判为 `ok`（ADR-014），这类问题只能靠审批与 DB diff 暴露；
+      - 自动批准的调用既不预演（D32），也没有人确认。默认就自动放行加购，这类错误写入就无人把关。
+  - **演示策略文件**（D34）：`configs/approval_policy.demo.yaml` 三种决策各一例，即上面两条规则加上 `small-cart-add-official`。
+    - `workbench api serve --demo`（`make demo-mock`）默认用它，进程环境中设置了 `WORKBENCH_APPROVAL__POLICY_FILE` 时以环境变量为准；docker-smoke 写入的 `.env` 选择它；API 测试与 CLI 测试也用它；
+    - 迷你演示场景的加购不命中其中任何规则，演示仍走审批卡片与预演；
+    - `GET /healthz` 的 `approval_policy` 字段给出当前生效的文件和每条规则的编号与决策，docker-smoke 据此确认用的是演示策略；
+    - 单元测试检查：默认策略没有 auto_approve 规则；把注释掉的示例取消注释，恰好得到演示策略。
+- **与任务书的偏差**（仓库主人已同意，D36）：
+  - 被规则要求人工审批的只读调用不预演（见上文"智能体与 API"）；
+  - `tool_policy.yaml` 的 `require_approval` 不再能免除 write 与 destructive 的审批（见上文"默认"）；
+  - 参数条件从严：缺少参数不命中，无法比较时只往更严的方向判（见上文"从严"）。
 - **验证**：
   - 单元测试：
-    - `test_approval_policy.py`：35 项，含规则顺序；工具、场景、风险过滤；数值与枚举条件；缺参与无法比较时从严；destructive 保护；默认决策；schema 错误逐条列出；默认策略文件；
+    - `test_approval_policy.py`：36 项，含规则顺序；工具、场景、风险过滤；数值与枚举条件；缺参与无法比较时从严；destructive 保护；默认决策；schema 错误逐条列出；默认策略文件没有 auto_approve 规则、示例取消注释后等于演示策略；演示策略三种决策各一例；
     - `test_gateway_approval_policy.py`：7 项，含自动批准不预演但测量改动；deny 带令牌也拒绝；read 可被要求人工审批；网关层的 destructive 保护；write 与 destructive 默认需要审批；启动时校验；`/admin/approvals` 直接拒绝、不预演；
-    - `test_agent_approval_policy.py`：3 项（自动批准、拒绝、read 交人工）；`test_cli.py`：3 项；`test_api.py` 断言待审批请求带 `policy`。
-  - 在 `make demo-mock` 上用浏览器核对了三种情形：默认策略、临时的 auto_approve 策略、临时的 deny 策略；docker-smoke 断言审批请求带默认决策。
+    - `test_agent_approval_policy.py`：3 项（自动批准、拒绝、read 交人工）；
+    - `test_cli.py`：5 项，其中 4 项是 `policy test`（含同一官方场景调用在演示策略下自动批准、在默认策略下交人工），1 项是演示模式使用演示策略、环境变量仍可覆盖；
+    - `test_api.py` 在演示策略下走完整流程，断言 `/healthz` 写明演示策略、待审批请求带 `policy`。
+  - 在 `make demo-mock` 上用浏览器核对了三种情形：当时的默认策略、临时的 auto_approve 策略、临时的 deny 策略（2026-09-25）。
+  - 2026-09-28（D34 之后）：`make demo-mock` 的 `GET /healthz` 写明演示策略与三条规则，`python3 scripts/docker_smoke.py --api-only http://127.0.0.1:8080` 对它通过；docker-smoke 在 CI 中先确认演示策略生效，再断言审批请求带默认决策。
 - **代价**：
   - 规则只看参数，不看数据库状态（例如购物车总额）。按预演改动决定是否放行的想法记在 IDEAS 第 14 条。
   - auto_approve 的调用执行前没有预演，只能事后比对实际改动（D32）。
   - 策略只在启动时加载，改文件要重启。字符串形式的数字不转换，可能让本该自动批准的调用交给人工（方向安全）。
+  - 默认策略下每次 write 都要人工审批，省不了人力；想省，管理员要自己权衡上面的风险后开启 auto_approve 规则（D34）。
   - `policy test` 离线分级只看工具名与路由的 HTTP 方法，在线会话还看工具描述，两者可能不同，可以用 `--risk` 指定。

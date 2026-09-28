@@ -4,12 +4,12 @@
 [![docker-smoke](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml/badge.svg?branch=main)](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml?query=branch%3Amain)
 
 > **English summary.** BizAgent Workbench is an application/engineering layer around Snowflake-Labs/agent-world-model (AWM) and Agent-One-Lab/AgentFly.
-> It runs isolated AWM MCP environments per session, puts every tool call behind a deny-first MCP gateway (ordered approval rules decide per call; a write that needs a person is first previewed in a throwaway shadow environment, then approved with a one-time token and audited), and drives them with a LangGraph agent, an HTTP/SSE API and a small web UI.
+> It runs isolated AWM MCP environments per session, puts every tool call behind a deny-first MCP gateway (ordered approval rules decide per call, and the shipped default auto-approves nothing; a write that needs a person is first previewed in a throwaway shadow environment, then approved with a one-time token and audited), and drives them with a LangGraph agent, an HTTP/SSE API and a small web UI.
 > It also orchestrates AWM's synthesis pipeline (dry-run by default) and a smoke-only training launcher in a separate environment.
 > Everything runs on CPU with a scripted mock LLM; GPU serving and training come as scripts plus a step-by-step runbook, still marked UNVERIFIED-LOCAL.
 > This repository produces no model performance numbers: paper numbers live only in `results/registry.yaml` (checked against arXiv 2602.10090 v3), and the application layer has never been benchmarked.
 
-- **本仓库做了什么**：把 AWM 的合成环境组织成可部署、可审计、可演示的企业 MCP 智能体工作台——每会话隔离的环境、deny-first 的 MCP 网关（可配置的审批策略、审批前在影子环境预演、一次性审批令牌、限流、审计）、LangGraph 智能体、HTTP/SSE API 与 Web UI，外加合成编排与 smoke 训练启动器。
+- **本仓库做了什么**：把 AWM 的合成环境组织成可部署、可审计、可演示的企业 MCP 智能体工作台——每会话隔离的环境、deny-first 的 MCP 网关（可配置的审批策略，默认不自动批准任何调用；审批前在影子环境预演、一次性审批令牌、限流、审计）、LangGraph 智能体、HTTP/SSE API 与 Web UI，外加合成编排与 smoke 训练启动器。
 - **上游提供了什么**：AWM 提供环境建库、MCP server 与合成 CLI，AgentWorldModel-1K 提供官方场景，Arctic-AWM 提供模型，AgentFly 与 veRL 提供训练框架。
 - **边界**：只改"怎么用、怎么部署、怎么管、怎么看"，不改"模型有多强"，不产生模型性能数字；上游只以固定 SHA 的 submodule 引用、从未修改，文件级边界与许可证见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
@@ -18,7 +18,7 @@
   <img src="docs/assets/demo-diff.png" width="400" align="top" alt="批准后的 DB diff：cart_items 由 1 行变为 2 行">
 </p>
 
-*mock 演示截图*：左为写操作 `add_item_to_cart` 的审批卡片，写明审批策略的判定（没有命中规则，write 默认交人工审批），附带影子环境预演出的"将要改动的行"；右为批准后与初始数据库比较的 DB diff（`cart_items` 新增一行）。回答来自手写的 mock 脚本，不是模型输出；截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成。
+*mock 演示截图*：左为写操作 `add_item_to_cart` 的审批卡片，写明审批策略的判定（演示策略中没有规则命中这次调用，write 默认交人工审批），附带影子环境预演出的"将要改动的行"；右为批准后与初始数据库比较的 DB diff（`cart_items` 新增一行）。回答来自手写的 mock 脚本，不是模型输出；截图由 `scripts/demo_ui_check.py` 在 `make demo-mock` 上生成。
 
 <img src="docs/assets/demo-overview.png" alt="整页：左侧会话与工具风险，中间对话与审批卡片（含预演 diff），右侧时间线">
 
@@ -75,6 +75,23 @@ python3 scripts/docker_smoke.py   # 构建 → 启动 env-manager 与 app → �
 GitHub Actions 的 docker-smoke 任务在每次 push 到 `main`、以及每个以 `main` 为目标的 PR 上运行这条命令（证据：[docs/verification/2026-09-24-docker-smoke.md](docs/verification/2026-09-24-docker-smoke.md)）。
 
 镜像内含 AWM 代码，而 AWM 没有许可证，所以镜像只用于本地和 CI 构建，不得推送到任何镜像仓库（ADR-003）。
+
+审批策略（ADR-030）：
+
+- 默认策略 `configs/approval_policy.yaml` 最保守，**不自动批准任何调用**：write 与 destructive 都交人工审批，另有一条 deny 规则（禁止删除已保存的支付方式）和一条 require_human 规则（单次加购超过 5 件）；
+- 自动批准须由管理员显式开启，文件里只留了一条注释掉的示例（原因见 ADR-030：官方环境会接受一些错误写入，而自动批准的调用不预演、也没有人确认）；
+- `make demo-mock` 与 docker-smoke 使用演示策略 `configs/approval_policy.demo.yaml`，三种决策各一例；`GET /healthz` 的 `approval_policy` 字段写明当前生效的文件。
+
+离线查看一次调用会命中哪条规则，不运行任何东西。下面是官方场景中加购 2 件：默认策略交人工，演示策略自动批准。
+
+```bash
+uv run workbench gateway policy test \
+  --tool e_commerce_33__add_item_to_cart --risk write --args '{"product_offer_id": 1, "quantity": 2}'
+# decision: require_human (default) - no rule matched: write calls need a human by default
+uv run workbench gateway policy test --policy configs/approval_policy.demo.yaml \
+  --tool e_commerce_33__add_item_to_cart --risk write --args '{"product_offer_id": 1, "quantity": 2}'
+# decision: auto_approve (rule small-cart-add-official) - ...
+```
 
 完整学习路线见 [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)。
 

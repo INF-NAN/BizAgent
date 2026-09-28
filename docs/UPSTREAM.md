@@ -73,7 +73,8 @@ git -C third_party/AgentFly status --porcelain            # 应为空
 | `Dockerfile`、`docker-compose.yml` | 部署（env-manager、app、可选 vllm）。镜像内含 AWM 代码，只用于本地和 CI 构建，不得推送到任何镜像仓库（§3.1、ADR-003） |
 | `configs/app.yaml` | 应用默认配置 |
 | `configs/tool_policy.yaml` | 网关风险分级、审批、限流策略 |
-| `configs/approval_policy.yaml` | 审批策略：按顺序匹配的 auto_approve / require_human / deny 规则（ADR-030） |
+| `configs/approval_policy.yaml` | 默认审批策略：按顺序匹配的 auto_approve / require_human / deny 规则（ADR-030）；不自动批准任何调用，auto_approve 只有注释掉的示例（D34） |
+| `configs/approval_policy.demo.yaml` | 演示审批策略：三种决策各一例，供 `make demo-mock`、docker-smoke 与测试使用（D34） |
 | `configs/serving/arctic-awm-4b.yaml` | vLLM 服务 profile |
 | `configs/pricing.yaml` | 合成账本的价格表（DeepSeek 官方价格页，上界口径） |
 | `configs/number_whitelist.yaml` | 数字守卫白名单；`skip_files` 只豁免三份任务书原文（ADR-028、D28） |

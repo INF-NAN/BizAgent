@@ -299,19 +299,43 @@ uv run python scripts/measure_preview.py --dataset-dir data/awm1k --scenario e_c
 
 ### 4.2 审批策略（Phase 18，ADR-030）
 
-`configs/approval_policy.yaml` 中的规则按顺序匹配，第一条命中的规则决定这次调用是 `auto_approve`、`require_human` 还是 `deny`。没有命中时，write 与 destructive 需要人工审批，read 不需要。destructive 调用永远不会被自动批准，这一点由代码保证：加载时拒绝这样的规则，匹配时跳过，网关签发令牌前再查一次。
+策略文件由 `approval.policy_file` 指定（`configs/app.yaml` 指向 `configs/approval_policy.yaml`）。文件中的规则按顺序匹配，第一条命中的规则决定这次调用是 `auto_approve`、`require_human` 还是 `deny`。没有命中时，write 与 destructive 需要人工审批，read 不需要。destructive 调用永远不会被自动批准，这一点由代码保证：加载时拒绝这样的规则，匹配时跳过，网关签发令牌前再查一次。
+
+两份策略文件（仓库主人的决定 D34）：
+
+- 默认策略 `configs/approval_policy.yaml` 最保守，不自动批准任何调用：
+  - 只有两条规则：禁止删除已保存的支付方式（deny）；单次加购超过 5 件交人工（require_human）；
+  - 自动批准的规则只作为注释掉的示例留在文件里，注明"自动放行需由管理员显式开启"；
+  - 理由：官方环境会接受一些错误写入（[LIMITATIONS](LIMITATIONS.md) §6：向购物车加入不存在的 offer 也会成功），而自动批准的调用既不预演，也没有人确认（ADR-030）。
+- 演示策略 `configs/approval_policy.demo.yaml` 三种决策各一例：上面两条，加上"官方 e-commerce 场景中单次加购不超过 2 件自动批准"（`small-cart-add-official`）。
+  - `make demo-mock`、docker-smoke 与相关测试使用它；
+  - 迷你演示场景的加购不命中其中任何规则，演示仍然走预演与审批卡片。
+
+当前生效的是哪个文件、有哪些规则，可以用 `curl -s http://127.0.0.1:8080/healthz` 查看（`approval_policy` 字段）。
 
 规则可以按工具名与场景名（glob）、风险级别、参数条件匹配。参数条件包括数值比较（`lt`/`lte`/`gt`/`gte`/`eq`/`ne`）和枚举成员（`in`/`not_in`）。字段说明写在文件开头的注释里；文件在网关启动时校验，出现未知字段就报错并停止。
 
-先离线试一次调用，不运行任何东西：
+先离线试一次调用，不运行任何东西。不带 `--policy` 时用 `approval.policy_file`，即默认策略：
 
 ```bash
 uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
   --scenario mini_e_commerce --tool add_item_to_cart --args '{"product_offer_id": 11, "quantity": 1}'
+# policy: configs/approval_policy.yaml (2 rules)
 # decision: require_human (default) - no rule matched: write calls need a human by default
 uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
   --tool mini_e_commerce__delete_user_payment_method --args '{"payment_method_id": 2}'
 # decision: deny (rule no-payment-method-deletion) - ...
+```
+
+官方场景中加购 2 件：演示策略自动批准，默认策略交人工（`--risk` 指定风险级别，不需要官方数据集）：
+
+```bash
+uv run workbench gateway policy test --policy configs/approval_policy.demo.yaml \
+  --tool e_commerce_33__add_item_to_cart --risk write --args '{"product_offer_id": 1, "quantity": 2}'
+# decision: auto_approve (rule small-cart-add-official) - ...
+uv run workbench gateway policy test \
+  --tool e_commerce_33__add_item_to_cart --risk write --args '{"product_offer_id": 1, "quantity": 2}'
+# decision: require_human (default) - no rule matched: write calls need a human by default
 ```
 
 输出会逐条列出每条规则是否命中、原因，以及 destructive 保护是否生效。
@@ -326,7 +350,7 @@ uv run workbench gateway policy test --dataset-dir tests/fixtures/awm_mini \
   - 时间线显示"auto-approved by the approval policy"和实际改动。
 - `deny`：网关拒绝（`denied_by_rule`），带着令牌也拒绝，也不能再申请审批。
 
-用临时策略文件在演示中看自动批准（不改仓库里的文件）：
+演示策略的自动批准规则只针对官方场景，迷你演示不会命中。要在演示中看自动批准，可以用临时策略文件（不改仓库里的文件）；环境变量 `WORKBENCH_APPROVAL__POLICY_FILE` 优先于演示策略：
 
 ```bash
 cat > /tmp/demo-policy.yaml <<'YAML'
@@ -353,7 +377,8 @@ tail -n 1 data/demo/audit.jsonl | python3 -m json.tool   # policy.rule、approve
 测试：
 
 - 单元：`tests/unit/test_approval_policy.py`、`tests/unit/test_gateway_approval_policy.py`、`tests/unit/test_agent_approval_policy.py`；
-- CLI：`tests/unit/test_cli.py` 中以 `test_gateway_policy_test_` 开头的三个测试。
+- CLI：`tests/unit/test_cli.py` 中以 `test_gateway_policy_test_` 开头的四个测试，以及 `test_demo_mode_uses_the_demo_approval_policy`；
+- 两份策略文件：`test_approval_policy.py` 中的 `test_the_default_policy_auto_approves_nothing`（默认策略没有 auto_approve 规则，取消注释示例后恰好等于演示策略）与 `test_the_demo_policy_shows_each_decision_and_keeps_the_demo_call_for_a_person`。
 
 ## 5. 智能体：LangGraph 状态机与 UI
 
