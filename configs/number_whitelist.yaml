@@ -22,3 +22,4 @@ files:
 skip_files:
   docs/process/TASK.md: the owner's task book (Phase 0-8), verbatim; its rule R3 quotes the forbidden wording
   docs/process/TASK_v2.md: the owner's task book (Phase 9-15), verbatim; §2.2 is the owner's transcription of Table 4
+  docs/process/TASK_v3.md: the owner's task text for Phases 16-18, verbatim from the conversation (decision D28)

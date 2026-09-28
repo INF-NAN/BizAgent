@@ -7,6 +7,7 @@ own subprocesses" and "separate env-manager container" (docker compose) is confi
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
@@ -47,6 +48,12 @@ class EnvService(Protocol):
     async def restore(self, session_id: str, name: str) -> None: ...
     async def touch(self, session_id: str) -> None: ...
     async def close(self) -> None: ...
+    # approval previews (ADR-029)
+    async def preview(
+        self, session_id: str, tool: str, arguments: dict[str, Any], timeout_s: float, max_rows: int = 20
+    ) -> dict[str, Any]: ...
+    async def checkpoint(self, session_id: str) -> str: ...
+    async def changes_since(self, session_id: str, checkpoint: str) -> dict[str, Any]: ...
 
 
 class LocalEnvService:
@@ -83,6 +90,17 @@ class LocalEnvService:
 
     async def close(self) -> None:
         await self.manager.stop_all()
+
+    async def preview(
+        self, session_id: str, tool: str, arguments: dict[str, Any], timeout_s: float, max_rows: int = 20
+    ) -> dict[str, Any]:
+        return await self.manager.preview(session_id, tool, arguments, timeout_s, max_rows)
+
+    async def checkpoint(self, session_id: str) -> str:
+        return await asyncio.to_thread(self.manager.checkpoint, session_id)
+
+    async def changes_since(self, session_id: str, checkpoint: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self.manager.changes_since, session_id, checkpoint)
 
 
 class RemoteEnvService:
@@ -131,6 +149,25 @@ class RemoteEnvService:
 
     async def touch(self, session_id: str) -> None:
         await self._call("POST", f"/envs/{session_id}/touch")
+
+    async def preview(
+        self, session_id: str, tool: str, arguments: dict[str, Any], timeout_s: float, max_rows: int = 20
+    ) -> dict[str, Any]:
+        body = {"tool": tool, "arguments": arguments, "timeout_s": timeout_s, "max_rows": max_rows}
+        # the env-manager enforces timeout_s; the HTTP call only needs to outlast it
+        result: dict[str, Any] = await self._call(
+            "POST", f"/envs/{session_id}/preview", json=body, timeout=timeout_s + 30
+        )
+        return result
+
+    async def checkpoint(self, session_id: str) -> str:
+        return str((await self._call("POST", f"/envs/{session_id}/checkpoints"))["checkpoint"])
+
+    async def changes_since(self, session_id: str, checkpoint: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._call(
+            "POST", f"/envs/{session_id}/checkpoints/{checkpoint}/changes"
+        )
+        return result
 
     async def close(self) -> None:
         await self._client.aclose()

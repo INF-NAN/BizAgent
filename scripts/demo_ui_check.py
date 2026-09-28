@@ -1,8 +1,10 @@
-"""Browser check of `make demo-mock`: query -> write -> approval -> done -> DB diff.
+"""Browser check of `make demo-mock`: query -> write -> preview + approval -> done -> DB diff.
 
-Besides the full-page screenshots in <screenshot_dir>, it saves the two README screenshots:
-the approval card (demo-approval.png) and the DB diff after approval (demo-diff.png), both in
-docs/assets/ unless --assets says otherwise. They show the scripted mock LLM, not a model.
+Besides the full-page screenshots in <screenshot_dir>, it saves the three README screenshots
+in docs/assets/ (unless --assets says otherwise): the approval card with the preview of the
+rows the call will change (demo-approval.png), the DB diff after approval (demo-diff.png) and
+the whole page at the approval step (demo-overview.png: conversation, timeline and approval
+card together). They show the scripted mock LLM, not a model.
 
 Requires playwright (not an app dependency) and a Chromium binary. Usage:
     make demo-mock &   # in another terminal
@@ -46,10 +48,13 @@ def main() -> None:
         page.wait_for_function("document.querySelector('#session-info').textContent.startsWith('session')")
         page.fill("#message", REQUEST)
         page.click("#send")
-        page.wait_for_selector("#approval:not(.hidden)", timeout=20000)
-        print("approval card:", page.inner_text("#approval-body").replace("\n", " ")[:160])
+        # the preview runs a shadow environment first (a few seconds, ADR-029)
+        page.wait_for_selector("#approval:not(.hidden)", timeout=60000)
+        page.wait_for_selector("#approval-body .preview-box", timeout=5000)
+        print("approval card:", page.inner_text("#approval-body").replace("\n", " ")[:300])
         page.screenshot(path=args.shots / "demo_1_approval.png", full_page=True)
         page.locator("#approval").screenshot(path=args.assets / "demo-approval.png")
+        page.screenshot(path=args.assets / "demo-overview.png", full_page=True, scale="css")
         page.fill("#approver", "alice")
         page.click("#approve")
         page.wait_for_function("[...document.querySelectorAll('.msg.agent')].length > 0", timeout=20000)
@@ -60,7 +65,10 @@ def main() -> None:
         page.screenshot(path=args.shots / "demo_2_done_diff.png", full_page=True)
         page.screenshot(path=args.assets / "demo-diff.png", clip=diff_clip(page))
         print("timeline items:", page.locator("#timeline li").count())
-        print("saved:", args.assets / "demo-approval.png", args.assets / "demo-diff.png")
+        checks = page.locator("#timeline li.tool_call .badge.match").all()
+        print("preview checks:", [c.inner_text() for c in checks])
+        saved = ("demo-approval.png", "demo-diff.png", "demo-overview.png")
+        print("saved:", *(args.assets / name for name in saved))
         b.close()
 
 

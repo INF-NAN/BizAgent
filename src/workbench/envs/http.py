@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from workbench.config import EnvSettings
 from workbench.envs.catalog import build_catalog, search
@@ -33,6 +33,13 @@ class StartRequest(BaseModel):
 
 class NameRequest(BaseModel):
     name: str
+
+
+class PreviewRequest(BaseModel):
+    tool: str
+    arguments: dict[str, Any] = {}
+    timeout_s: float = Field(gt=0, le=600)
+    max_rows: int = Field(default=20, ge=1, le=500)
 
 
 def create_env_app(settings: EnvSettings, manager: EnvManager | None = None) -> FastAPI:
@@ -107,6 +114,25 @@ def create_env_app(settings: EnvSettings, manager: EnvManager | None = None) -> 
         _get(sid)
         mgr.touch(sid)
         return {"ok": sid}
+
+    # approval previews (ADR-029): a shadow env for one call, and before/after changes of a real call
+    @app.post("/envs/{sid}/preview")
+    async def preview(sid: str, req: PreviewRequest) -> dict[str, Any]:
+        _get(sid)
+        return await mgr.preview(sid, req.tool, req.arguments, req.timeout_s, req.max_rows)
+
+    @app.post("/envs/{sid}/checkpoints")
+    async def checkpoint(sid: str) -> dict[str, str]:
+        _get(sid)
+        return {"checkpoint": mgr.checkpoint(sid)}
+
+    @app.post("/envs/{sid}/checkpoints/{cid}/changes")
+    async def changes_since(sid: str, cid: str) -> dict[str, Any]:
+        _get(sid)
+        try:
+            return mgr.changes_since(sid, cid)
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(404, f"unknown checkpoint {cid}") from exc
 
     @app.get("/envs/{sid}/health")
     async def health(sid: str) -> dict[str, Any]:

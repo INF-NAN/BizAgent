@@ -1,4 +1,5 @@
-"""LangGraph wiring: intake -> plan -> act <-> observe -> verify -> approve (as needed) -> respond."""
+"""LangGraph wiring: intake -> plan -> act <-> observe -> verify -> respond; a call that needs approval
+goes act -> preview -> approve (interrupt) -> observe, or back to plan when rejected."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from workbench.agent.nodes.approve import make_approve
 from workbench.agent.nodes.intake import make_intake
 from workbench.agent.nodes.observe import make_observe
 from workbench.agent.nodes.plan import make_plan
+from workbench.agent.nodes.preview import make_preview
 from workbench.agent.nodes.respond import make_respond
 from workbench.agent.nodes.verify import make_verify
 from workbench.agent.state import AgentState
@@ -19,7 +21,8 @@ from workbench.agent.state import AgentState
 ROUTES: dict[str, list[str]] = {
     "intake": ["plan"],
     "plan": ["act", "respond"],
-    "act": ["approve", "observe", "verify", "respond"],
+    "act": ["preview", "observe", "verify", "respond"],
+    "preview": ["approve"],
     "approve": ["observe", "plan"],
     "observe": ["act", "respond"],
     "verify": ["act", "respond"],
@@ -35,6 +38,7 @@ def build_graph(deps: AgentDeps, checkpointer: Any = None) -> Any:
     g.add_node("intake", make_intake(deps))
     g.add_node("plan", make_plan(deps))
     g.add_node("act", make_act(deps))
+    g.add_node("preview", make_preview(deps))
     g.add_node("approve", make_approve(deps))
     g.add_node("observe", make_observe(deps))
     g.add_node("verify", make_verify(deps))

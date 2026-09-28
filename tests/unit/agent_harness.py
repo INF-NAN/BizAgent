@@ -11,6 +11,7 @@ from workbench.agent.deps import AgentDeps
 from workbench.agent.memory import MemoryService
 from workbench.agent.runner import AgentRunner
 from workbench.config import AgentSettings, GatewaySettings, LLMSettings
+from workbench.gateway.approval_policy import ApprovalPolicy
 from workbench.gateway.core import Gateway
 from workbench.gateway.policy import ApprovalService, PolicyConfig
 from workbench.gateway.upstream import ToolSpec
@@ -81,6 +82,7 @@ async def make_runner(
     checkpointer: Any = None,
     start_at: int = 0,
     upstream: MiniUpstream | None = None,
+    approval_rules: list[dict[str, Any]] | None = None,
     **agent_overrides: Any,
 ) -> tuple[AgentRunner, MiniUpstream, AgentDeps]:
     from langgraph.checkpoint.memory import InMemorySaver
@@ -91,6 +93,7 @@ async def make_runner(
         policy=PolicyConfig.load(Path("configs/tool_policy.yaml")),
         approvals=ApprovalService(secret=b"k"),
         upstream=up,
+        approval_policy=ApprovalPolicy.model_validate({"version": 1, "rules": approval_rules or []}),
     )
     await gateway.register_session("s1", SCENARIO, "http://fake/mcp")
     llm = LLMClient(MockReplayBackend(FIX / fixture, start_at=start_at), LLMSettings())

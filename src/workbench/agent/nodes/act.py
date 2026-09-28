@@ -58,19 +58,30 @@ def make_act(deps: AgentDeps) -> Node:
             }
         )
         risk = next((t["risk"] for t in state["tools"] if t["name"] == tc.name), "unknown")
-        pending: PendingCall = {"id": tc.id, "name": tc.name, "arguments": tc.arguments, "risk": risk}
-        needs_approval = deps.gateway.requires_approval(sid, tc.name) if "__" in tc.name else False
-        deps.hub.emit(sid, "node", node="act", step=steps, tool=tc.name, arguments=tc.arguments, risk=risk)
-        if needs_approval:
+        # The approval policy decides per call (ADR-030): only require_human waits for a person;
+        # auto_approve, deny and plain reads go straight to the gateway, which enforces the same answer.
+        verdict = deps.gateway.approval_verdict(sid, tc.name, tc.arguments) if "__" in tc.name else None
+        policy = verdict.as_dict() if verdict is not None else None
+        needs_person = verdict is not None and verdict.decision == "require_human"
+        pending: PendingCall = {
+            "id": tc.id,
+            "name": tc.name,
+            "arguments": tc.arguments,
+            "risk": risk,
+            "policy": policy,
+        }
+        call = {"tool": tc.name, "arguments": tc.arguments, "risk": risk, "policy": policy}
+        deps.hub.emit(sid, "node", node="act", step=steps, **call)
+        if needs_person:
             # emitted here, not in `approve`: LangGraph re-runs an interrupted node on resume
-            deps.hub.emit(sid, "approval_requested", tool=tc.name, arguments=tc.arguments, risk=risk)
+            deps.hub.emit(sid, "approval_requested", **call)
         return {
             "messages": messages,
             "pending_call": pending,
             "call_counts": counts,
             "steps": steps,
             "tokens_used": tokens,
-            "next": "approve" if needs_approval else "observe",
+            "next": "preview" if needs_person else "observe",
         }
 
     return act

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 TerminationReason = Literal[
     "max_steps",
@@ -25,6 +25,10 @@ class PendingCall(TypedDict):
     name: str
     arguments: dict[str, Any]
     risk: str
+    # the gateway's signed preview record, for calls that need approval (ADR-029)
+    preview: NotRequired[dict[str, Any] | None]
+    # the approval policy's answer: decision, deciding rule id (None: the default), reason (ADR-030)
+    policy: NotRequired[dict[str, Any] | None]
 
 
 class AgentState(TypedDict, total=False):

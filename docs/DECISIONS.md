@@ -668,3 +668,149 @@
   - `make check-numbers` 输出 `scanned 27 files (2 exempt as skip_files); 0 finding(s)`（27 个文件含新增的 `docs/process/README.md`）；
   - `tests/unit/test_results.py` 新增两个测试：同一目录下未列出的文件仍被扫描；豁免清单恰好是这两个文件，且文件存在。
 - **代价**：任务书中的数字不再受守卫检查。它们只是转录，不是本仓库的结论；论文数字的唯一来源仍是 registry。
+- **补充（2026-09-25，D28）**：仓库主人要求把本轮任务原文存为 `docs/process/TASK_v3.md` 并同样豁免；`skip_files` 与固定它的单测随之改为三个文件。
+
+## ADR-029 写操作审批前在影子环境预演（approval preview）
+
+- **背景**：
+  - Phase 17（`docs/process/TASK_v3.md`，仓库主人的决定 D29）要求：write 与 destructive 调用进入审批之前，先在影子环境里执行同一调用，把"将要改动的行"附在审批请求上；审批令牌绑定（工具、参数哈希、预演 diff 哈希）；批准并真实执行后，比对实际改动与预演，不一致时记 `preview_mismatch`。
+  - 已有的能力：
+    - env-manager 以独立进程组、租用端口、白名单环境变量启动 AWM server（ADR-004、ADR-019）；
+    - `envs/snapshot` 用 SQLite 在线备份做快照，`diff` 只列出变化的主键；
+    - 网关的一次性 HMAC 令牌绑定（会话、工具、参数摘要）；审计为 JSONL。
+  - 约束：影子环境绝不触碰真实数据库；预演有超时；不修改上游。LangGraph 恢复被 interrupt 暂停的节点时会从头重跑该节点（`docs/RECON.md` §10 "Phase 5" 的实测）。
+- **可选方案**：
+  1. 在 approve 节点里、interrupt 之前预演：恢复时整个节点重跑，预演会执行两次，否决；
+  2. 在会话自己的 server 上执行后回滚：AWM 生成的代码自己提交事务，没有回滚的入口，而且会写真实数据库，否决；
+  3. 由 env-manager 在隔离端口起一个影子环境，从会话当前数据库的副本启动，执行同一调用后回收（选定）。
+- **决定**：
+  - **影子环境**（`EnvManager.preview`）：
+    - 用 SQLite 在线备份复制会话当前的 `work.db`（只读，会话的 server 照常运行）；
+    - 用与会话环境相同的启动路径起 AWM server：独立进程组、端口池中的端口、白名单环境变量，`--db_path`、`--temp_server_path`、`--output_dir` 全部指向 `<run_dir>/previews/<id>/`（AWM 只写这些位置，见 RECON）；
+    - 经 MCP 执行同一调用，用 `workbench.envs.changes` 计算改动；
+    - 无论成功、出错还是超时，都在 `finally` 中按进程组回收、释放端口、删除目录（回收不受取消影响）；
+    - 整个预演受 `approval.preview_timeout_s` 限制；不占 `max_envs` 名额，并发数受 `env.max_previews` 限制；
+    - 经 `EnvService` 同时提供本地实现与 HTTP 实现（新增 `/envs/{sid}/preview`、`/checkpoints`），所以 docker compose 的 env-manager 容器中同样可用。
+  - **行级改动与结构比对**（`workbench.envs.changes`）：
+    - 按 `snapshot.diff` 的方式对行加键，记录新增、删除、修改的行，以及每个修改行改动的列名（展示时每类最多 `preview_max_rows` 行，比对时使用全部键）；
+    - 只比对结构：改动的表，新增、删除、修改的主键，改动的列名（D29）；
+    - 时间类列（声明类型含 DATE/TIME、时间默认值、`*_at`/`*_time`/`*_date` 等列名）只记录、不比对；主键不是 INTEGER rowid 别名的表，新增行只比对行数；识别依据与官方数据的统计见 RECON "Phase 17"；
+    - 每次比对都写明忽略了哪些列（`ignored_columns`）、哪些表按行数比对（`count_only`）。
+  - **网关**：
+    - `Gateway.preview` 生成预演记录，用审批密钥签名（覆盖 id、会话、工具、参数摘要、状态、digest；digest 是改动的 sha256），并写一条审计；
+    - `issue_approval` 只信任本网关为同一调用签发、且 digest 与内容一致的记录；令牌写入 `p`（预演 digest，或 `preview_unavailable`）与 `pid`；
+    - `approval.require_preview` 按风险级别配置，默认 `{write: false, destructive: true}`：为 true 而预演未成功时不签发令牌，只能拒绝；为 false 时令牌绑定 `preview_unavailable`；
+    - 经批准的调用前后各取一次改动（`checkpoint` / `changes_since`），与令牌绑定的预演比对，结果 `preview_check` 写入审计与调用结果：`match`、`preview_mismatch`（附差异与忽略的列）、`preview_unavailable` 或 `check_failed`；
+    - 管理端新增 `/admin/previews`；`/admin/approvals` 没有给出 `preview_id` 时，先在本请求中预演。
+  - **智能体与 API**：
+    - act 与 approve 之间新增 preview 节点，记录保存在 checkpoint 中，approve 节点重跑时不会再预演；
+    - 批准时把记录交给 `issue_approval`；必需的预演失败时改为拒绝并发出 `approval_refused`；API 在恢复图之前就返回 409。
+  - **UI**：审批卡片显示"将要改动的行"或醒目的"未预演"与原因；必需的预演失败时禁用 Approve；时间线与对话标出 `preview_mismatch`。
+  - **超时**：
+    - `scripts/measure_preview.py` 在开发容器中实测（4 核 CPU，每项 10 次，日志 `docs/verification/logs/2026-09-25-preview-timing.log`）：
+      - 迷你夹具：总耗时中位 3678 ms、最大 3806 ms；
+      - 官方 `e_commerce_33`（39 个工具）：总耗时中位 4316 ms、最大 5977 ms；
+      - 其中启动影子 server 占绝大部分（官方场景中位 4169 ms），调用约 100 ms，复制、diff、回收各几到几十 ms。
+    - 超时取官方场景最慢一次总耗时的 5 倍，向上取整到 5 秒，即 30 秒。
+- **验证**：
+  - 单元测试：
+    - `test_changes.py`：6 项，含"两次执行只有时间戳不同，不判为 mismatch"；
+    - `test_gateway_preview.py`：7 项，覆盖必需与可选的预演、mismatch、令牌与参数不符时拒绝、篡改或外来的记录；
+    - `test_env_service.py` 与 `test_api.py` 各新增一项。
+  - 集成测试（真实 AWM 迷你 server）：`test_preview_real_awm.py` 5 项：
+    - 加购的预演与真实 diff 一致；
+    - destructive 预演显示将删除的行；
+    - 从会话当前数据库启动（第二次预演得到主键 3）；
+    - 超时与影子 server 启动即退出两条失败路径；
+    - 回收后没有存活的进程组成员，端口可重新绑定，也没有残留目录。
+  - 官方数据（本地运行，CI 中 skip）：`e_commerce_33` 的 `add_item_to_cart` 预演与真实执行结果为 match，忽略 `cart_items` 的 `created_at`、`updated_at`。
+  - docker-smoke 断言审批请求带预演 diff、批准后为 match（经 env-manager 容器）；`scripts/demo_ui_check.py` 在浏览器中走通并截图。
+- **代价**：
+  - 每个需要审批的调用多等一次影子 server 启动（本机实测约 4–6 秒），还要多占一个 server 进程的内存（受 `max_previews` 限制）。
+  - 生成的代码被多执行一次：写数据库以外的副作用（外部请求等）会发生两次。官方 1000 个环境的代码中没有 `requests`、`subprocess`、`os.system`，`httpx` 只出现 1 次（RECON）。
+  - 比对只看结构：时间列与生成的主键无法按值比对；如果某个 server 用随机值给 INTEGER 主键赋值，会被误报为 `preview_mismatch`（误报方向安全）。
+  - 预演记录用审批密钥验证：进程重启且没有固定 `WORKBENCH_APPROVAL_SECRET` 时，挂起中、要求预演的审批只能拒绝后重新发起。
+  - 独立运行的 `workbench gateway serve` 没有 env-manager 时无法预演，destructive 调用因此不能在这里批准（设计如此，见 LIMITATIONS §6）。
+
+## ADR-030 可配置的审批策略（approval policy）
+
+- **背景**：
+  - Phase 18（`docs/process/TASK_v3.md`）要求：
+    - 新增 `configs/approval_policy.yaml`：规则按顺序匹配（工具名通配、风险级别、参数条件：数值比较、枚举成员），决策为 auto_approve / require_human / deny；
+    - 没有命中任何规则时，write 与 destructive 一律 require_human；
+    - destructive 永远不能 auto_approve，在代码中硬性保证，不依赖配置；
+    - 加载时做 schema 校验，出现未知字段即报错；新增 `workbench gateway policy test`；
+    - 审计与 UI 记录并显示命中的规则编号。
+  - 仓库主人的决定 D32：auto_approve 的 write 调用不跑预演，令牌绑定 `preview_unavailable`，批准人记为 `policy:<规则编号>`；执行后照常测量实际改动，与规则编号一起写入审计；require_human 的调用照常预演。
+  - 仓库主人的决定 D34（Phase 18 确认时）：默认策略不启用 auto_approve，演示与测试改用单独的演示策略文件；D36：同意下文"与任务书的偏差"中的三处。
+  - 已有的能力：`tool_policy.yaml`（deny-first 允许清单、风险分级、`require_approval` 风险级别、限流）；一次性 HMAC 审批令牌（ADR-029 起绑定预演）；智能体按工具的风险级别决定是否进入审批。
+- **可选方案**：
+  1. 扩展 `tool_policy.yaml`：与风险分级混在一起，也难以做严格的 schema 校验，否决；
+  2. 由智能体判断：外部 MCP 客户端直连网关时绕过智能体，不受约束，否决；
+  3. 单独的策略文件，由网关在每次调用时判定；智能体只是在调用前向网关问同一个答案（选定）。
+- **决定**：
+  - **文件与校验**（`workbench.gateway.approval_policy`）：
+    - 用 pydantic 模型、`extra="forbid"`：未知字段、类型错误、空列表、重复的规则编号、版本不对，在加载时一次列出，每条带 YAML 路径和规则编号；
+    - 网关启动时按 `approval.policy_file` 加载（`configs/app.yaml` 指向 `configs/approval_policy.yaml`），文件有错则无法启动。
+  - **匹配**：规则按文件顺序尝试，第一条命中的规则决定。可用的字段：
+    - `tools`、`scenarios`：工具名、场景名的 glob，整名匹配、区分大小写（`fnmatch.fnmatchcase`，见 RECON）；
+    - `risk`：风险级别列表；
+    - `args`：参数条件，`lt`/`lte`/`gt`/`gte`/`eq`/`ne` 比较数字，`in`/`not_in` 判断是否在列表中，同一参数的多个条件都要成立。
+  - **从严**：
+    - 缺少参数时，条件不成立；
+    - 参数存在但无法比较（数字条件遇到字符串 `"2"` 或布尔值，列表中没有同类型的值）时，deny 与 require_human 规则视为命中，auto_approve 规则视为不命中，所以不确定时决策只会更严；
+    - 字符串形式的数字不转换。
+  - **默认**：没有命中规则时，write 与 destructive 需要人工审批；read 不需要，除非 `tool_policy.yaml` 的 `require_approval` 列出了 read。`require_approval` 只能增加审批，不能再免除 write 与 destructive 的审批；要免除，只能写 auto_approve 规则（`policy.needs_approval_by_default`）。
+  - **destructive 的硬性保护**分三层：
+    - 加载时拒绝在同一条规则里同时写 `destructive` 与 auto_approve；
+    - `evaluate` 对 destructive 调用跳过 auto_approve 规则并继续匹配（后面的 deny 仍然生效），跳过记为 `guard`；
+    - 网关代表策略签发令牌之前再查一次风险级别：即使策略对象回答 auto_approve，destructive 调用也只能等人工审批。
+  - **网关执行**（`Gateway.call_tool`，在允许清单之后、令牌检查之前）：
+    - deny：拒绝，decision 为 `denied_by_rule`，带着令牌也拒绝；`issue_approval` 与 `/admin/approvals` 也拒绝（409，不先预演）；
+    - auto_approve：调用方没有给令牌时，网关自己签发一次性令牌（批准人 `policy:<规则编号>`，绑定 `preview_unavailable`，不预演，D32），然后走已批准调用的路径：真实调用前后各取一次改动，`preview_check` 为 `preview_unavailable`，写明由哪条规则自动批准，并附上实际改动。对本来就不需要审批的 read 调用，auto_approve 等于放行；
+    - require_human：需要人签发的令牌；read 调用也可以被规则要求人工审批；
+    - 判定结果 `policy`（decision、rule、reason、guard）写入 CallOutcome 与审计；rule 为空表示用了默认。
+  - **智能体与 API**：
+    - act 节点调用 `Gateway.approval_verdict` 得到同一个答案：只有 require_human 进入 preview → approve；auto_approve、deny 与普通 read 直接交给网关；
+    - 被规则要求人工审批的 read 调用不预演（不改动任何行）；
+    - 审批请求（interrupt 负载、`GET /approvals`）带 `policy`。
+  - **UI**：
+    - 审批卡片显示"审批策略"一行：命中的规则编号与说明，或 default；
+    - 时间线的工具调用显示规则徽标；
+    - 自动批准的调用显示"auto-approved by the approval policy"、中性的"no preview"徽标和实际改动，而不是红色的"未预演"；
+    - 被规则拒绝的调用显示 `denied_by_rule`，对话中以警告显示。
+  - **`workbench gateway policy test`**：不运行任何东西，给出某次调用会命中哪条规则、得到什么决策：
+    - 逐条列出每条规则是否命中及原因，以及 destructive 保护是否生效；
+    - 说明该决策在运行时意味着什么；
+    - 风险级别由 `--risk` 指定，或按 `gateway export-risk` 的方式离线分级。
+  - **默认策略文件**（D34）：`configs/approval_policy.yaml` 不自动批准任何调用。
+    - 规则只有两条：禁止删除已保存的支付方式（deny）；单次加购超过 5 件交人工（require_human）；
+    - "官方 e-commerce 场景（`e_commerce_*`）中单次加购不超过 2 件自动批准"（`small-cart-add-official`）只作为注释掉的示例留在文件里，注明"自动放行需由管理员显式开启"；
+    - 理由：
+      - 默认配置应当最保守：不改配置就部署的人，得到的应当是最严格的行为，放宽要由管理员显式决定；
+      - LIMITATIONS §6 已记录，官方环境 `e_commerce_33` 向购物车加入不存在的 offer ID 也会成功写入，网关只能判为 `ok`（ADR-014），这类问题只能靠审批与 DB diff 暴露；
+      - 自动批准的调用既不预演（D32），也没有人确认。默认就自动放行加购，这类错误写入就无人把关。
+  - **演示策略文件**（D34）：`configs/approval_policy.demo.yaml` 三种决策各一例，即上面两条规则加上 `small-cart-add-official`。
+    - `workbench api serve --demo`（`make demo-mock`）默认用它，进程环境中设置了 `WORKBENCH_APPROVAL__POLICY_FILE` 时以环境变量为准；docker-smoke 写入的 `.env` 选择它；API 测试与 CLI 测试也用它；
+    - 迷你演示场景的加购不命中其中任何规则，演示仍走审批卡片与预演；
+    - `GET /healthz` 的 `approval_policy` 字段给出当前生效的文件和每条规则的编号与决策，docker-smoke 据此确认用的是演示策略；
+    - 单元测试检查：默认策略没有 auto_approve 规则；把注释掉的示例取消注释，恰好得到演示策略。
+- **与任务书的偏差**（仓库主人已同意，D36）：
+  - 被规则要求人工审批的只读调用不预演（见上文"智能体与 API"）；
+  - `tool_policy.yaml` 的 `require_approval` 不再能免除 write 与 destructive 的审批（见上文"默认"）；
+  - 参数条件从严：缺少参数不命中，无法比较时只往更严的方向判（见上文"从严"）。
+- **验证**：
+  - 单元测试：
+    - `test_approval_policy.py`：36 项，含规则顺序；工具、场景、风险过滤；数值与枚举条件；缺参与无法比较时从严；destructive 保护；默认决策；schema 错误逐条列出；默认策略文件没有 auto_approve 规则、示例取消注释后等于演示策略；演示策略三种决策各一例；
+    - `test_gateway_approval_policy.py`：7 项，含自动批准不预演但测量改动；deny 带令牌也拒绝；read 可被要求人工审批；网关层的 destructive 保护；write 与 destructive 默认需要审批；启动时校验；`/admin/approvals` 直接拒绝、不预演；
+    - `test_agent_approval_policy.py`：3 项（自动批准、拒绝、read 交人工）；
+    - `test_cli.py`：5 项，其中 4 项是 `policy test`（含同一官方场景调用在演示策略下自动批准、在默认策略下交人工），1 项是演示模式使用演示策略、环境变量仍可覆盖；
+    - `test_api.py` 在演示策略下走完整流程，断言 `/healthz` 写明演示策略、待审批请求带 `policy`。
+  - 在 `make demo-mock` 上用浏览器核对了三种情形：当时的默认策略、临时的 auto_approve 策略、临时的 deny 策略（2026-09-25）。
+  - 2026-09-28（D34 之后）：`make demo-mock` 的 `GET /healthz` 写明演示策略与三条规则，`python3 scripts/docker_smoke.py --api-only http://127.0.0.1:8080` 对它通过；docker-smoke 在 CI 中先确认演示策略生效，再断言审批请求带默认决策。
+- **代价**：
+  - 规则只看参数，不看数据库状态（例如购物车总额）。按预演改动决定是否放行的想法记在 IDEAS 第 14 条。
+  - auto_approve 的调用执行前没有预演，只能事后比对实际改动（D32）。
+  - 策略只在启动时加载，改文件要重启。字符串形式的数字不转换，可能让本该自动批准的调用交给人工（方向安全）。
+  - 默认策略下每次 write 都要人工审批，省不了人力；想省，管理员要自己权衡上面的风险后开启 auto_approve 规则（D34）。
+  - `policy test` 离线分级只看工具名与路由的 HTTP 方法，在线会话还看工具描述，两者可能不同，可以用 `--risk` 指定。
