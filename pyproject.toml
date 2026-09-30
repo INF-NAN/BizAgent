@@ -1,10 +1,16 @@
 [project]
 name = "bizagent-workbench"
 version = "0.1.0"
-description = "Engineering workbench around Agent World Model (AWM) MCP environments: env manager, MCP gateway, LangGraph agent, API/UI."
+description = "Deployable, auditable agent workbench around Agent World Model (AWM) MCP environments: isolated env sessions, a deny-first MCP gateway with approval policies and previews, a LangGraph agent, HTTP/SSE API and web UI."
 readme = "README.md"
-license = "MIT"  # own code only: third_party/, datasets and models keep their own terms
+license = "MIT"  # this repository's own code; third_party/, datasets and models keep their own terms
+authors = [{ name = "Yueyi Li" }]
 requires-python = ">=3.12,<3.13"
+keywords = ["agents", "mcp", "langgraph", "llm", "agent-world-model"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+]
 dependencies = [
     # Upstream AWM, used through its Python interface and CLI (never copied; see docs/UPSTREAM.md).
     "agent-world-model",
@@ -24,6 +30,12 @@ dependencies = [
     "huggingface-hub",  # `make data` downloads the official dataset (never committed)
 ]
 
+[project.urls]
+Homepage = "https://github.com/IntheFesh/Agent2"
+Repository = "https://github.com/IntheFesh/Agent2"
+Documentation = "https://github.com/IntheFesh/Agent2/tree/main/docs"
+Issues = "https://github.com/IntheFesh/Agent2/issues"
+
 [project.scripts]
 workbench = "workbench.cli:app"
 
@@ -39,8 +51,8 @@ dev = [
 ]
 
 [tool.uv]
-# Keep the app environment on exactly the versions AWM's own uv.lock was tested with
-# (rule R11: never upgrade/downgrade upstream-pinned dependencies). See docs/RECON.md §7.
+# Keep the app environment on exactly the versions AWM's own uv.lock was tested with, so the
+# upstream code runs on the dependency set it was built for (docs/UPSTREAM.md §8).
 constraint-dependencies = [
     "mcp==1.26.0",
     "pydantic==2.12.5",
