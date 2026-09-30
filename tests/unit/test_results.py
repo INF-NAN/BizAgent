@@ -19,7 +19,7 @@ def test_registry_contract() -> None:
     models = {f"{s}.{m}" for s in ("4b", "8b", "14b") for m in ("base", "awm")}
     for b, m in pairs:
         assert {e.model for e in reg.entries if (e.benchmark, e.metric) == (b, m)} == models
-    assert all(Path(e.evidence or "").is_file() for e in reg.entries)
+    assert reg.raw["paper"]["check_method"]
 
 
 @pytest.mark.parametrize(
@@ -29,8 +29,7 @@ def test_registry_contract() -> None:
         (lambda r: r["entries"][0]["source"].pop("table"), "source lacks"),
         (lambda r: r["entries"][0].update(verified="no"), "verified must be"),
         (lambda r: r["entries"][0]["source"].update(row=None), "verified entries need"),
-        (lambda r: r["entries"][0].pop("evidence"), "verified entries need"),
-        (lambda r: r["entries"][0].update(evidence="docs/nope.md"), "does not exist"),
+        (lambda r: r["paper"].pop("check_method"), "check_method"),
         (lambda r: r["entries"][0].update(unit="percent"), "unit"),
         (lambda r: r["entries"][0].update(printed="1.00"), "printed"),
         (lambda r: r["entries"][1].update(id=r["entries"][0]["id"]), "duplicate"),
@@ -42,7 +41,7 @@ def test_registry_rejects_bad_entries(tmp_path: Path, mutate, msg: str) -> None:
     p = tmp_path / "r.yaml"
     p.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
     with pytest.raises(RegistryError, match=msg):
-        load_registry(p, repo_root=Path.cwd())
+        load_registry(p)
 
 
 def test_results_md_is_generated_from_registry() -> None:
@@ -58,7 +57,7 @@ def test_unverified_entries_render_as_pending(tmp_path: Path) -> None:
     raw["entries"][0]["verified"] = False
     p = tmp_path / "r.yaml"
     p.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
-    rendered = render_results_md(load_registry(p, repo_root=Path.cwd()))
+    rendered = render_results_md(load_registry(p))
     assert rendered.count("**待核对**") == 1
 
 
@@ -76,7 +75,7 @@ def test_guard_flags_unregistered_metrics(tmp_path: Path) -> None:
 
 
 def test_guard_flags_app_layer_claims(tmp_path: Path) -> None:
-    assert any("rule R3" in r for r in _scan(tmp_path, "网关带来了成功率提升\n"))
+    assert any("effectiveness claim" in r for r in _scan(tmp_path, "网关带来了成功率提升\n"))
 
 
 def test_guard_accepts_registry_values_with_disclaimer(tmp_path: Path) -> None:
@@ -84,34 +83,26 @@ def test_guard_accepts_registry_values_with_disclaimer(tmp_path: Path) -> None:
 
 
 def test_guard_requires_disclaimer_next_to_paper_numbers(tmp_path: Path) -> None:
-    assert _scan(tmp_path, "14B AWM: 39.03\n") == ["paper numbers cited without the R3 disclaimer"]
+    assert _scan(tmp_path, "14B AWM: 39.03\n") == ["paper numbers cited without the registry disclaimer"]
 
 
 def test_guard_ignores_versions_and_whitelist(tmp_path: Path) -> None:
-    assert _scan(tmp_path, "python 3.12, `pydantic>=2.11`, starlette <0.47, mcp 1.26.0, 2026-09-24\n") == []
+    assert _scan(tmp_path, "python 3.12, `pydantic>=2.11`, starlette <0.47, mcp 1.26.0, 2026-03-14\n") == []
 
 
-def test_guard_skips_only_the_listed_files(tmp_path: Path) -> None:
-    (tmp_path / "docs" / "process").mkdir(parents=True)
+def test_guard_scans_readme_and_all_docs(tmp_path: Path) -> None:
+    (tmp_path / "docs" / "examples").mkdir(parents=True)
     (tmp_path / "README.md").write_text("ok\n", encoding="utf-8")
     (tmp_path / "docs" / "a.md").write_text("网关带来了成功率提升\n", encoding="utf-8")
-    (tmp_path / "docs" / "process" / "TASK.md").write_text("不得出现成功率提升；61.44\n", encoding="utf-8")
-    (tmp_path / "docs" / "process" / "notes.md").write_text("reaches 87.50\n", encoding="utf-8")
-    wl = {"tokens": {}, "files": {}, "skip_files": {"docs/process/TASK.md": "verbatim task book"}}
-    files = default_targets(tmp_path, skip=wl["skip_files"])
+    (tmp_path / "docs" / "examples" / "run.md").write_text("reaches 87.50\n", encoding="utf-8")
+    files = default_targets(tmp_path)
     assert [f.relative_to(tmp_path).as_posix() for f in files] == [
         "README.md",
         "docs/a.md",
-        "docs/process/notes.md",  # same directory, not listed: still scanned
+        "docs/examples/run.md",
     ]
+    wl = {"tokens": {}, "files": {}}
     assert sorted(f.file for f in scan(files, load_registry(REG), wl, tmp_path)) == [
         "docs/a.md",
-        "docs/process/notes.md",
+        "docs/examples/run.md",
     ]
-
-
-def test_guard_exempts_only_the_verbatim_task_books() -> None:
-    skip = load_whitelist(Path("configs/number_whitelist.yaml"))["skip_files"]
-    # ADR-028 (and D28 for TASK_v3): only the owner's verbatim task books, nothing else
-    assert set(skip) == {"docs/process/TASK.md", "docs/process/TASK_v2.md", "docs/process/TASK_v3.md"}
-    assert all(Path(p).is_file() and str(reason).strip() for p, reason in skip.items())

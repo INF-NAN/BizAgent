@@ -5,10 +5,10 @@ AWM's GPTClient talks to ``OPENAI_BASE_URL`` (third_party/agent-world-model/awm/
 (awm/core/scenario.py:83-86). Pointing both at ``http://127.0.0.1:<port>/step/<step>/v1``
 lets us, without touching AWM code: (1) cache identical requests on disk, (2) retry network
 errors / 5xx with backoff, (3) attribute token usage to the pipeline step in the ledger, and
-(4) stop at a budget (ADR-023): once the run's ledger cost reaches it, requests that would go
+(4) stop at a budget (ADR-021): once the run's ledger cost reaches it, requests that would go
 upstream are refused with HTTP 402 (cache hits are still served), which makes the current step
 fail; the runner then marks it failed and a rerun with a higher budget resumes, and (5) record
-every request that ends in an upstream error as ``failed`` (ADR-024): AWM turns such errors into
+every request that ends in an upstream error as ``failed`` (ADR-022): AWM turns such errors into
 empty replies and exits 0 (awm/gpt.py:195-206), so the runner judges the step from the ledger.
 Every entry carries the request's cache key so the runner can tell AWM's retries of one request
 apart from different requests.
@@ -30,7 +30,7 @@ from starlette.routing import Route
 
 from workbench.synth.ledger import Ledger, LedgerEntry, Price
 
-# What a process behind the proxy gets instead of the upstream key (ADR-019, ADR-025).
+# What a process behind the proxy gets instead of the upstream key (ADR-017, ADR-023).
 PLACEHOLDER_KEY = "workbench-proxy"  # pragma: allowlist secret
 
 

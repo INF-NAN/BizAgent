@@ -26,7 +26,7 @@ def make_approve(deps: AgentDeps) -> Node:
                 "arguments": pc["arguments"],
                 "risk": pc["risk"],
                 "preview": preview,  # the rows this call will change, or why the preview failed
-                "policy": pc.get("policy"),  # the approval rule that sent it to a person (ADR-030)
+                "policy": pc.get("policy"),  # the approval rule that sent it to a person (ADR-027)
             }
         )
         approver = str(decision.get("approver") or "unknown")

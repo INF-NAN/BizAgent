@@ -3,16 +3,17 @@
 Tool names are exposed as ``<scenario>__<tool>`` so tools of different scenarios can never
 collide. Every call — allowed, denied or failed — produces exactly one audit line.
 
-Approval previews (ADR-029): ``preview`` runs a write/destructive call in a shadow environment
+Approval previews (ADR-026): ``preview`` runs a write/destructive call in a shadow environment
 (through the env service) and returns a signed record of the rows it would change;
 ``issue_approval`` binds the token to that preview's digest, or to ``preview_unavailable`` when
 the risk level allows approving without one (``approval.require_preview``); an approved call is
 measured (checkpoint before, changes after) and compared with its preview in the audit line.
 
-Approval policy (ADR-030): before the tool policy's token check, ``approval_policy`` decides per
+Approval policy (ADR-027): before the tool policy's token check, ``approval_policy`` decides per
 call — ``deny`` refuses it, ``require_human`` needs a person's token, ``auto_approve`` lets the
 gateway issue the token itself (approver ``policy:<rule>``, bound to ``preview_unavailable``, no
-preview; owner decision D32). Destructive calls are never approved on the policy's behalf.
+preview, since no person would read it; the real change is still measured and audited).
+Destructive calls are never approved on the policy's behalf.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ POLICY_APPROVER = "policy:"  # approver prefix of tokens the gateway issues for 
 
 
 class PreviewBackend(Protocol):
-    """Runs previews and measures real calls; the env service implements it (ADR-029)."""
+    """Runs previews and measures real calls; the env service implements it (ADR-026)."""
 
     async def preview(
         self, session_id: str, tool: str, arguments: dict[str, Any], timeout_s: float, max_rows: int = 20
@@ -208,7 +209,7 @@ class Gateway:
         ``allowlist=None`` means "every tool discovered right now" (explicitly enumerated,
         so tools that appear later are still denied); ``[]`` allows nothing.
         ``tool_methods`` (tool -> HTTP method, from the offline catalog) sets a risk floor;
-        tools missing from it keep the name heuristic (ADR-015).
+        tools missing from it keep the name heuristic (ADR-006).
         """
         specs = await self.upstream.list_tools(url, self.settings.upstream_timeout_s)
         route = SessionRoute(session_id, scenario, url, tool_methods=dict(tool_methods or {}))
@@ -453,7 +454,7 @@ class Gateway:
                 }
         measured = changes_summary(actual) if actual is not None else None
         if grant.preview == PREVIEW_UNAVAILABLE:
-            if grant.approver.startswith(POLICY_APPROVER):  # auto_approve: no preview by design (D32)
+            if grant.approver.startswith(POLICY_APPROVER):  # auto_approve: nobody would read a preview
                 rule = grant.approver.removeprefix(POLICY_APPROVER)
                 reason = f"auto-approved by approval policy rule {rule}; no preview is run"
             else:
@@ -539,11 +540,11 @@ class Gateway:
             needs_approval=self.needs_approval(risk),
         )
         if verdict.decision == "auto_approve" and verdict.needs_token and token is None:
-            if risk == "destructive":  # the hard guard, whatever evaluate() answered (ADR-030)
+            if risk == "destructive":  # the hard guard, whatever evaluate() answered (ADR-027)
                 verdict = dataclasses.replace(
                     verdict, decision="require_human", reason=f"{verdict.reason}; {GUARD}", guard=GUARD
                 )
-            else:  # the policy approves on its own behalf: no preview, preview_unavailable (D32)
+            else:  # the policy approves on its own behalf: no preview, preview_unavailable
                 token = self.approvals.issue(route.session_id, tool, args, f"{POLICY_APPROVER}{verdict.rule}")
         decision = self.policy.decide(
             session_id=route.session_id,

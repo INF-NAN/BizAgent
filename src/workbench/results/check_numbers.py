@@ -3,14 +3,12 @@
 A token counts as "performance-like" if it is a percentage, a two-decimal score (x.xx) or a
 Pass@k value. Each such token must be a registry value (with the paper disclaimer on the
 same page) or be whitelisted in configs/number_whitelist.yaml with a reason. Application-
-layer effectiveness wording (R3) is rejected outright. Files listed under `skip_files` there
-(the owner's task books, kept verbatim) are not scanned at all (ADR-028).
+layer effectiveness wording is rejected outright (ADR-013).
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,16 +43,14 @@ class Finding:
 
 def load_whitelist(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"tokens": {}, "files": {}, "skip_files": {}}
+        return {"tokens": {}, "files": {}}
     raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {k: raw.get(k) or {} for k in ("tokens", "files", "skip_files")}
+    return {k: raw.get(k) or {} for k in ("tokens", "files")}
 
 
-def default_targets(root: Path, skip: Iterable[str] = ()) -> list[Path]:
-    """README.md and docs/**/*.md, minus the repo-relative paths in ``skip``."""
-    skipped = set(skip)
-    files = [root / "README.md", *sorted((root / "docs").rglob("*.md"))]
-    return [f for f in files if f.relative_to(root).as_posix() not in skipped]
+def default_targets(root: Path) -> list[Path]:
+    """README.md and every Markdown file under docs/."""
+    return [root / "README.md", *sorted((root / "docs").rglob("*.md"))]
 
 
 def scan(files: list[Path], registry: Registry, whitelist: dict[str, Any], root: Path) -> list[Finding]:
@@ -71,9 +67,7 @@ def scan(files: list[Path], registry: Registry, whitelist: dict[str, Any], root:
         for n, line in enumerate(text.splitlines(), start=1):
             for phrase in FORBIDDEN:
                 if phrase in line:
-                    findings.append(
-                        Finding(rel, n, phrase, "application-layer effectiveness claim (rule R3)")
-                    )
+                    findings.append(Finding(rel, n, phrase, "application-layer effectiveness claim"))
             for rx in (PERCENT, SCORE, PASS_AT_K):
                 for m in rx.finditer(line):
                     token = m.group(0).strip()
@@ -89,6 +83,6 @@ def scan(files: list[Path], registry: Registry, whitelist: dict[str, Any], root:
                     )
         if cites_registry and DISCLAIMER not in text:
             findings.append(
-                Finding(rel, 0, "(registry value)", "paper numbers cited without the R3 disclaimer")
+                Finding(rel, 0, "(registry value)", "paper numbers cited without the registry disclaimer")
             )
     return findings

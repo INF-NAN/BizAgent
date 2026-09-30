@@ -1,8 +1,8 @@
 """`workbench train preflight`: GPU, CUDA/torch/vLLM/veRL versions, data paths, config keys.
 
 All probes of the train env run as subprocesses (`uv run --project train --no-sync ...`) and
-are injectable for tests (GPU info is mocked in CI: there is no GPU, rule R10). The CLI runs them
-with the environment training will get (``env_runner(train_env())``, ADR-026), so preflight
+are injectable for tests (GPU info is mocked in CI, which has no GPU). The CLI runs them
+with the environment training will get (``env_runner(train_env())``, ADR-024), so preflight
 checks what `launch` will see.
 """
 
@@ -54,7 +54,7 @@ def check_gpu(run: Runner, min_free_mb: int = 12_000) -> CheckResult:
         ["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"]
     )
     if rc != 0:
-        return CheckResult("gpu", "fail", "nvidia-smi unavailable: UNVERIFIED-LOCAL (needs a CUDA GPU)")
+        return CheckResult("gpu", "fail", "nvidia-smi unavailable: training needs a CUDA GPU")
     gpus = [line.split(",") for line in out.strip().splitlines() if line.strip()]
     if not gpus:
         return CheckResult("gpu", "fail", "no GPU listed by nvidia-smi")
@@ -122,7 +122,7 @@ def load_yaml_tolerant(path: Path) -> Any:
     """Parse YAML, dropping git conflict-marker lines (keeps both sides).
 
     The pinned veRL fork (001f000) ships `_generated_ppo_trainer.yaml` with unresolved merge
-    markers (lines 177-185, docs/RECON.md §10 Phase 7). That file is a flattened reference,
+    markers (lines 177-185; docs/UPSTREAM.md §7.2). That file is a flattened reference,
     not what Hydra loads, so for a static key check the union of both sides is acceptable;
     the authoritative check is `hydra_compose_check` inside the train env.
     """
@@ -189,7 +189,7 @@ def verl_config_files(agentfly_dir: Path) -> list[Path]:
 def run_preflight(
     profile: TrainProfile, agentfly_dir: Path, train_project: Path, run: Runner | None = None
 ) -> list[CheckResult]:
-    """All checks; the probes run in ``train_env()`` unless ``run`` says otherwise (ADR-026)."""
+    """All checks; the probes run in ``train_env()`` unless ``run`` says otherwise (ADR-024)."""
     run = run or env_runner(train_env())
     keys = [
         *profile.overrides,

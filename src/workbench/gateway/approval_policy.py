@@ -1,4 +1,4 @@
-"""Configurable approval policy (Phase 18, ADR-030): ordered rules decide, for each call, whether a
+"""Configurable approval policy (ADR-027): ordered rules decide, for each call, whether a
 human must approve it, the policy approves it, or it is refused.
 
 A rule matches on the tool name (globs), the scenario (globs), the risk level and conditions on
@@ -36,7 +36,7 @@ RuleDecision = Literal["auto_approve", "require_human", "deny"]
 Outcome = Literal["allow", "auto_approve", "require_human", "deny"]
 NUMERIC_OPS = ("lt", "lte", "gt", "gte", "eq", "ne")
 SET_OPS = ("in", "not_in")
-GUARD = "destructive calls are never auto-approved (ADR-030)"
+GUARD = "destructive calls are never auto-approved (ADR-027)"
 
 
 class ApprovalPolicyError(ValueError):
@@ -193,7 +193,7 @@ class Verdict:
 
     ``needs_token``: the call runs only with a one-time approval token — a human's for
     ``require_human``, and for ``auto_approve`` one the gateway issues on the policy's behalf
-    (approver ``policy:<rule>``, bound to ``preview_unavailable``, owner decision D32).
+    (approver ``policy:<rule>``, bound to ``preview_unavailable``: no person would read a preview).
     """
 
     decision: Outcome

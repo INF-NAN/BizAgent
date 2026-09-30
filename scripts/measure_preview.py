@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure approval-preview timings (ADR-029): prepare, start, call, diff, reclaim and total.
+"""Measure approval-preview timings (ADR-026): prepare, start, call, diff, reclaim and total.
 
     uv run python scripts/measure_preview.py                    # mini fixture, 10 previews
     uv run python scripts/measure_preview.py --dataset-dir data/awm1k --scenario e_commerce_33 \\
@@ -8,7 +8,7 @@
 Starts one session environment, then runs the same preview N times on it; each preview copies
 the session DB, starts and reclaims its own shadow server. Prints per-stage minimum, median and
 maximum in milliseconds, and the preview timeout they suggest (five times the slowest total,
-rounded up to whole 5 s). Engineering numbers only (rule R3): they depend on the machine, which
+rounded up to whole 5 s). Engineering numbers only: they depend on the machine, which
 is printed with them. No LLM is called.
 """
 

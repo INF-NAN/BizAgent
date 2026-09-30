@@ -1,4 +1,4 @@
-"""Zero-cost synthesis harness (owner decision D17): no paid API is involved.
+"""Zero-cost synthesis harness: no paid API is involved.
 
 - ``fake_upstream``: an OpenAI-compatible ``/chat/completions`` served on a real local port; its
   reply is a digest of the request body, so a rerun that sends the same requests gets the same
@@ -10,7 +10,7 @@
   still exits 0, and `verifier` appends each reply to its output as it arrives while the other
   steps write once at the end. ``fake_step_runner`` runs it for every `awm gen` command.
 - ``ScriptedTransport``: the proxy's upstream transport, answering chosen requests with an HTTP
-  error or a network error for their first attempts (ADR-024 tests).
+  error or a network error for their first attempts (ADR-022 tests).
 - ``main``: the driver, run as its own process (``python -m tests.unit.synth_harness ...``) so a
   test can signal it by its exact PID. It runs SynthRunner and the proxy the way
   `workbench synth run --execute` does.

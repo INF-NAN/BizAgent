@@ -1,12 +1,13 @@
 # SMOKE profile — demonstrates one "rollout -> reward -> update" loop ONLY.
-# Rule R2: <=1.7B model, LoRA, <=5 steps, tiny batch; outputs are marked NO_RESULTS and must
-# never be used for any effectiveness claim. UNVERIFIED-LOCAL: needs Linux + CUDA GPU with the
-# train env installed (cd train && uv sync) and AgentFly's nested verl submodule initialized.
+# Limits checked by workbench.train.profile: <=1.7B model, LoRA, <=5 steps; tiny batch. Outputs are
+# marked NO_RESULTS and must never be used for any effectiveness claim. Needs Linux + a CUDA GPU
+# with the train env installed (cd train && uv sync) and AgentFly's nested verl submodule
+# initialized (docs/DEPLOYMENT.md).
 #
 # It uses AgentFly's own built-in `calculator` tool and `math_equal_reward_tool`
 # (third_party/AgentFly/src/agentfly/tools/src/calculate/tools.py:6-9,
 #  src/agentfly/rewards/math_reward.py:492-495), so no untested plugin code is involved.
-# Hydra keys follow the pinned veRL fork config (docs/RECON.md §10 Phase 7), which differs
+# Hydra keys follow the pinned veRL fork config (docs/UPSTREAM.md §7.2), which differs
 # from AgentFly's examples/train_scripts/train_example.sh.
 profile: smoke
 no_results: true

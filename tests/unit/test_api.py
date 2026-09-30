@@ -124,7 +124,7 @@ def make_app(
         policy=PolicyConfig.load(Path("configs/tool_policy.yaml")),
         approvals=ApprovalService(secret=b"k"),
         upstream=MiniUpstream(),
-        approval=ApprovalSettings(policy_file=DEMO_POLICY),  # as in make demo-mock (D34)
+        approval=ApprovalSettings(policy_file=DEMO_POLICY),  # as in make demo-mock
     )
     llm = LLMClient(backend or MockReplayBackend(FIX / "demo_query_write_approve.jsonl"), settings.llm)
     rt = Runtime(settings, env_service=envs, gateway=gateway, llm=llm)
@@ -173,7 +173,7 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         events = sse_events(r.text)
         assert events[-1]["type"] == "approval_required"
         assert any(e["type"] == "tool_call" for e in events)
-        # the approval request carries the preview: the rows the call will change (ADR-029)
+        # the approval request carries the preview: the rows the call will change (ADR-026)
         preview = events[-1]["preview"]
         assert preview["status"] == "ok" and preview["approvable"] and preview["summary"] == "cart_items +1"
         assert preview["changes"]["tables"]["cart_items"]["added"][0]["row"]["product_offer_id"] == 11
@@ -182,7 +182,7 @@ async def test_full_flow_over_http(tmp_path: Path) -> None:
         pending = (await c.get("/approvals")).json()
         assert pending[0]["approval_id"] == sid and pending[0]["tool"].endswith("add_item_to_cart")
         assert pending[0]["preview"]["digest"] == preview["digest"]
-        # and the approval policy's answer: no demo rule covers this call, so it goes to a person (ADR-030)
+        # and the approval policy's answer: no demo rule covers this call, so it goes to a person (ADR-027)
         assert (pending[0]["policy"]["decision"], pending[0]["policy"]["rule"]) == ("require_human", None)
         # a new message while an approval is pending is refused
         assert (await c.post(f"/sessions/{sid}/messages", json={"content": "hi"})).status_code == 409

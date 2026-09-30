@@ -67,7 +67,7 @@ def test_gpu_check_mocked() -> None:
     assert check_gpu(ok).status == "ok"
     small = fake_runner({"nvidia-smi": (0, "T4, 15360, 4000\n")})
     assert check_gpu(small).status == "fail"
-    assert "UNVERIFIED-LOCAL" in check_gpu(fake_runner({})).detail
+    assert "needs a CUDA GPU" in check_gpu(fake_runner({})).detail
 
 
 def test_train_env_probe_mocked() -> None:
@@ -142,7 +142,7 @@ FORBIDDEN = ("torch", "verl", "agentfly", "vllm", "ray", "transformers", "deepsp
 
 
 def test_app_code_never_imports_training_deps() -> None:
-    """Rule R11: the app environment must not import training dependencies."""
+    """The app environment must not import training dependencies (ADR-002)."""
     offenders = []
     for py in Path("src/workbench").rglob("*.py"):
         tree = ast.parse(py.read_text(encoding="utf-8"))

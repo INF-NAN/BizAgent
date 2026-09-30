@@ -1,8 +1,8 @@
 """`workbench doctor`: environment self-check.
 
 Each check returns a CheckResult. ``fail`` is blocking (non-zero exit); ``warn`` is
-informational. A missing GPU or a not-yet-downloaded dataset is only a warning (rule R10:
-everything must work on CPU with the mock backend).
+informational. A missing GPU or a not-yet-downloaded dataset is only a warning:
+everything except GPU serving and training works on CPU with the mock backend.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def check_ports(settings: Settings) -> CheckResult:
 def check_gpu(which: Callable[[str], str | None] = shutil.which) -> CheckResult:
     if which("nvidia-smi") is None:
         return CheckResult(
-            "gpu", "warn", "no nvidia-smi: GPU steps are UNVERIFIED-LOCAL (mock mode still works)"
+            "gpu", "warn", "no nvidia-smi: GPU serving and training need a CUDA GPU (mock mode still works)"
         )
     return CheckResult("gpu", "ok", "nvidia-smi found")
 

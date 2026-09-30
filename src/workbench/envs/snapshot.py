@@ -3,7 +3,7 @@
 Uses the sqlite3 online-backup API, so it is safe while the AWM server holds the database
 open. ``diff`` compares table-level row counts and primary-key sets (rows keyed by the
 table's primary key, or by ``rowid`` when a table has none); ``workbench.envs.changes`` reads
-rows with the same keys and adds row contents and changed columns (approval previews, ADR-029).
+rows with the same keys and adds row contents and changed columns (approval previews, ADR-026).
 """
 
 from __future__ import annotations

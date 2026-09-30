@@ -76,7 +76,7 @@ async def test_read_allowed_and_audited(gw: tuple[Gateway, FakeUpstream]) -> Non
 
 async def test_destructive_denied_without_approval_then_allowed(gw: tuple[Gateway, FakeUpstream]) -> None:
     g, up = gw
-    # token mechanics only: previews are covered in test_gateway_preview.py (ADR-029)
+    # token mechanics only: previews are covered in test_gateway_preview.py (ADR-026)
     g.approval_settings = ApprovalSettings(require_preview={"write": False, "destructive": False})
     await g.register_session("s1", "mini", "http://x/mcp")
     args = {"payment_method_id": 2}
@@ -145,7 +145,7 @@ async def test_empty_status_only_for_read_tools(gw: tuple[Gateway, FakeUpstream]
 
 async def test_http_method_floor_requires_approval(gw: tuple[Gateway, FakeUpstream]) -> None:
     g, up = gw
-    # list_cart_items is a read by name; served by a DELETE route it must need approval (ADR-015)
+    # list_cart_items is a read by name; served by a DELETE route it must need approval (ADR-006)
     await g.register_session(
         "s1", "mini", "http://x/mcp", tool_methods={"list_cart_items": "DELETE", "search_products": "GET"}
     )

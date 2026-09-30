@@ -14,9 +14,9 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # 13-19 digits, optionally grouped by spaces/dashes (card numbers)
 CARD = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 # phone numbers: optional +country, 7-15 digits with separators. Timestamps are not phones
-# (ADR-016): a match may not start inside a word or decimal ("(?<![\w.])"), right after
+# (ADR-014): a match may not start inside a word or decimal ("(?<![\w.])"), right after
 # "<digit>:" (the seconds of "17:05:31.506430") or end right before ":<digit>" (the hour of
-# "2026-09-23 17:05:16"); a bare YYYY-MM-DD date is kept by _mask_phone.
+# "2026-03-13 17:05:16"); a bare YYYY-MM-DD date is kept by _mask_phone.
 PHONE = re.compile(r"(?<![\w.])(?<!\d:)\+?\d[\d\s().-]{6,}\d(?![\w])(?!:\d)")
 
 
@@ -71,12 +71,12 @@ class AuditRecord:
     status: str
     duration_ms: float
     ts: float = 0.0
-    # approval previews (ADR-029): the preview itself (decision "preview"), or on an approved call
+    # approval previews (ADR-026): the preview itself (decision "preview"), or on an approved call
     # the preview it was bound to, and how its real changes compared (match / preview_mismatch /
     # preview_unavailable / check_failed, the differences and the ignored columns)
     preview: dict[str, Any] | None = None
     preview_check: dict[str, Any] | None = None
-    # the approval policy's answer (ADR-030): decision, the deciding rule id (None: the default
+    # the approval policy's answer (ADR-027): decision, the deciding rule id (None: the default
     # applied), reason, and the destructive guard when it skipped an auto_approve rule
     policy: dict[str, Any] | None = None
 

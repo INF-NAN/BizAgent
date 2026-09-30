@@ -85,7 +85,7 @@ def test_synth_run_dry_run_with_scenario_file(tmp_path) -> None:  # type: ignore
 
 
 MINI = ["--dataset-dir", "tests/fixtures/awm_mini", "--scenario", "mini_e_commerce"]
-DEMO_POLICY = ["--policy", "configs/approval_policy.demo.yaml"]  # one rule of each decision (D34)
+DEMO_POLICY = ["--policy", "configs/approval_policy.demo.yaml"]  # one rule of each decision
 
 
 def flat(output: str) -> str:
@@ -102,7 +102,7 @@ def test_gateway_policy_test_explains_each_rule_and_the_decision() -> None:
     assert "risk: write (heuristic: verb 'add' => write)" in out
     assert "quantity=1 fails gt 5" in out  # every rule is listed with why it did not match
     assert "decision: require_human (default) - no rule matched: write calls need a human by default" in out
-    assert "means: a person approves it on the approval card, after a preview (ADR-029)" in out
+    assert "means: a person approves it on the approval card, after a preview" in out
 
     pm_args = ["--tool", "delete_user_payment_method", "--args", '{"payment_method_id": 2}']
     pm = runner.invoke(app, ["gateway", "policy", "test", *DEMO_POLICY, *MINI, *pm_args])
@@ -112,7 +112,7 @@ def test_gateway_policy_test_explains_each_rule_and_the_decision() -> None:
 
 def test_gateway_policy_test_the_default_policy_auto_approves_nothing() -> None:
     """The official-scenario call the demo policy auto-approves goes to a person under the default
-    policy, which configs/app.yaml selects when --policy is not given (owner decision D34)."""
+    policy, which configs/app.yaml selects when --policy is not given."""
     args = '{"product_offer_id": 1, "quantity": 2}'
     call = ["--tool", "e_commerce_33__add_item_to_cart", "--risk", "write", "--args", args]
     demo = runner.invoke(app, ["gateway", "policy", "test", *DEMO_POLICY, *call])
@@ -152,7 +152,7 @@ def test_gateway_policy_test_auto_approve_and_the_destructive_guard(tmp_path) ->
     assert d.exit_code == 0, d.output
     out = flat(d.output)
     assert "skipped" in out and "decision: require_human (default)" in out
-    assert "guard: rule everything skipped: destructive calls are never auto-approved (ADR-030)" in out
+    assert "guard: rule everything skipped: destructive calls are never auto-approved (ADR-027)" in out
 
 
 def test_gateway_policy_test_errors(tmp_path) -> None:  # type: ignore[no-untyped-def]

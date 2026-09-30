@@ -1,4 +1,4 @@
-"""Planted secrets and leak checks for the subprocess isolation tests (ADR-019)."""
+"""Planted secrets and leak checks for the subprocess isolation tests (ADR-017)."""
 
 from __future__ import annotations
 

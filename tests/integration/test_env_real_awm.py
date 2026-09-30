@@ -33,7 +33,7 @@ async def test_real_awm_env_list_tools_and_clean_stop(manager: EnvManager) -> No
         body = json.loads(res.content[0].text)
         assert body["total"] == 3 and body["products"][0]["product"]["title"] == "Wired Headphones C"
 
-    # AWM artifacts land in the session dir, never next to the dataset (RECON §1.2)
+    # AWM artifacts land in the session dir, never next to the dataset (awm/core/server.py:134-138)
     assert (h.run_dir / "temp_server.py").exists()
     assert not list(manager.settings.dataset_dir.glob("temp_server_*.py"))
 
@@ -42,7 +42,7 @@ async def test_real_awm_env_list_tools_and_clean_stop(manager: EnvManager) -> No
     await manager.stop("int1")
     await asyncio.sleep(0.3)
     # No orphaned `sh | tee | server` left alive. (Killed members may linger as zombies when
-    # PID 1 does not reap them, as in this sandbox; docker compose uses `init: true`.)
+    # PID 1 does not reap them, as in some minimal containers; docker compose uses `init: true`.)
     assert live_group_members(pgid) == []
     assert is_bindable("127.0.0.1", h.port)
 
@@ -62,7 +62,7 @@ async def test_write_shows_up_in_db_diff(manager: EnvManager) -> None:
 async def test_env_server_process_tree_sees_no_secrets(
     manager: EnvManager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Launcher, `sh`, `tee` and the generated server all start with the allowlist (ADR-019)."""
+    """Launcher, `sh`, `tee` and the generated server all start with the allowlist (ADR-017)."""
     plant(monkeypatch)
     h = await manager.start("mini_e_commerce", session_id="int3")
     assert h.state == "healthy" and len(h.tools) == 7  # the allowlist is enough to serve

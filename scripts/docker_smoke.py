@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Docker smoke test (Phase 14, owner decision D15; runs in .github/workflows/docker-smoke.yml).
+"""Docker smoke test of the compose stack (runs in .github/workflows/docker-smoke.yml).
 
 Builds the compose stack, starts it WITHOUT the gpu profile, drives the mock demo over the HTTP
 API (query -> write -> preview + approval -> done), prints image sizes and the cold-start time,
-and stops the stack. The API must run with the demo approval policy (one rule of each decision,
-owner decision D34; GET /healthz names it), the approval request must carry the policy's decision
-(ADR-030) and the preview diff (a shadow environment in the env-manager container, ADR-029), and the
+and stops the stack. The API must run with the demo approval policy (one rule of each decision;
+GET /healthz names it), the approval request must carry the policy's decision
+(ADR-027) and the preview diff (a shadow environment in the env-manager container, ADR-026), and the
 approved write must match it. Standard library only, so it runs on a bare CI runner.
 
 The stack needs no edits for this: the image already contains tests/fixtures and configs, compose
@@ -15,7 +15,7 @@ mounts ./data and reads an optional ./.env. The script copies the hand-written m
 a user's .env must never be overwritten) and removes both at the end. Full mode therefore needs a
 clean checkout without ./data (as on a CI runner).
 
-Engineering facts only (R3): sizes come from `docker image inspect`, times from time.monotonic().
+Engineering facts only: sizes come from `docker image inspect`, times from time.monotonic().
 
     python3 scripts/docker_smoke.py                          # full run (needs Docker + Compose v2)
     python3 scripts/docker_smoke.py --api-only http://HOST:PORT   # only the API flow (e.g. make demo-mock)
@@ -99,7 +99,7 @@ def wait_healthy(url: str, timeout_s: float) -> None:
 def api_flow(base: str) -> list[str]:
     """Query -> write -> approval -> done over the HTTP API; returns summary lines."""
     out: list[str] = []
-    # the demo approval policy is in force: one rule of each decision (owner decision D34)
+    # the demo approval policy is in force: one rule of each decision
     status, body = http("GET", f"{base}/healthz")
     loaded = (json.loads(body) if status == 200 else {}).get("approval_policy") or {}
     decisions = sorted(rule.rsplit(" (", 1)[-1].rstrip(")") for rule in loaded.get("rules") or [])
@@ -131,8 +131,8 @@ def api_flow(base: str) -> list[str]:
     policy = last.get("policy") or {}
     if (policy.get("decision"), policy.get("rule")) != ("require_human", None):
         raise SmokeError(f"expected the default approval decision (require_human, no rule), got {policy}")
-    out.append(f"approval policy (ADR-030): {policy.get('reason')}")
-    # the approval card carries the preview diff: the rows the call will change (ADR-029)
+    out.append(f"approval policy (ADR-027): {policy.get('reason')}")
+    # the approval card carries the preview diff: the rows the call will change (ADR-026)
     preview = last.get("preview") or {}
     added = (((preview.get("changes") or {}).get("tables") or {}).get("cart_items") or {}).get("added") or []
     if preview.get("status") != "ok" or [a.get("row", {}).get("product_offer_id") for a in added] != [11]:

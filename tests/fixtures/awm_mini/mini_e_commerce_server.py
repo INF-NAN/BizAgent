@@ -5,7 +5,7 @@
 # point at the end) so that AWM's real launcher (awm.core.server) can patch and serve it
 # over MCP Streamable HTTP. Used only for offline CPU tests and the mock demo.
 #
-# Interface provenance (reconciled on 2026-09-24, docs/verification/2026-09-24-fixture-reconciliation.md):
+# Interface provenance (tool list of the original: docs/examples/e-commerce-33-tools.md):
 # the 7 tool names, their parameter names / required-ness and the top-level response field
 # names follow the official `e_commerce_33` environment of AgentWorldModel-1K
 # (Snowflake/AgentWorldModel-1K @ dde80a0, CC-BY-4.0, by Zhaoyang Wang et al.). The code

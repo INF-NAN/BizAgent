@@ -47,13 +47,9 @@ for sub, name in [
     app.add_typer(sub, name=name)
 
 console = Console()
-# `api serve --demo` uses this approval policy: one rule of each decision (owner decision D34)
+# `api serve --demo` uses this approval policy: one rule of each decision, so the demo shows every
+# path; the default policy (configs/approval_policy.yaml) auto-approves nothing
 DEMO_APPROVAL_POLICY = Path("configs/approval_policy.demo.yaml")
-
-
-def _not_implemented(phase: int) -> None:
-    console.print(f"[yellow]not implemented yet (Phase {phase})[/yellow]")
-    raise typer.Exit(code=2)
 
 
 @app.command()
@@ -89,7 +85,7 @@ def verify(
         None, "--judge-model", help="sql mode: judge model (default AWM_SYN_OVERRIDE_MODEL)."
     ),
 ) -> None:
-    """Run `awm verify` once; no key reaches the verifier code (sql judge via the local proxy, ADR-025)."""
+    """Run `awm verify` once; no key reaches the verifier code (sql judge via the local proxy)."""
     from workbench.verify import VerifyError, run_verify
 
     try:
@@ -246,7 +242,7 @@ def gateway_serve() -> None:
     """Run the MCP gateway standalone (MCP at /mcp, admin endpoints under /admin).
 
     Approval previews need an env-manager (``env.manager_url``); without one they are unavailable,
-    so levels that require a preview (destructive by default) cannot be approved here (ADR-029).
+    so levels that require a preview (destructive by default) cannot be approved here.
     """
     import uvicorn
 
@@ -268,7 +264,7 @@ def gateway_export_risk(
 ) -> None:
     """Classify every tool of every scenario offline (name + route HTTP method) into a CSV for review.
 
-    ``heuristic_risk`` is the name-only result before the HTTP-method floor (ADR-015), so the CSV
+    ``heuristic_risk`` is the name-only result before the HTTP-method floor, so the CSV
     also shows what the floor changed.
     """
     import csv
@@ -326,12 +322,12 @@ def gateway_export_risk(
     )
 
 
-policy_app = typer.Typer(help="Approval policy (ADR-030).", no_args_is_help=True)
+policy_app = typer.Typer(help="Approval policy (ordered rules, first match decides).", no_args_is_help=True)
 gateway_app.add_typer(policy_app, name="policy")
 
 POLICY_MEANS = {
     "auto_approve": "the gateway approves it on the policy's behalf: approver policy:{rule}, no preview, the "
-    "token is bound to preview_unavailable, and the real change is still measured and audited (D32)",
+    "token is bound to preview_unavailable, and the real change is still measured and audited",
     "require_human": "a person approves it on the approval card{after}",
     "deny": "refused; nobody can approve it",
     "allow": "allowed without approval",
@@ -417,7 +413,7 @@ def gateway_policy_test(
     means = POLICY_MEANS[verdict.decision]
     if verdict.decision == "auto_approve" and not verdict.needs_token:
         means = "allowed without approval; the rule is recorded in the audit"
-    after = " (no preview: a read changes nothing)" if level == "read" else ", after a preview (ADR-029)"
+    after = " (no preview: a read changes nothing)" if level == "read" else ", after a preview"
     console.print(f"means: {means.format(rule=verdict.rule, after=after)}")
 
 
@@ -426,7 +422,7 @@ def serve_vllm_cmd(
     profile: Path = typer.Option(Path("configs/serving/arctic-awm-4b.yaml"), "--profile"),
     args_only: bool = typer.Option(False, "--args-only", help="one argument per line (for scripts)"),
 ) -> None:
-    """Print the vLLM command for a serving profile (running it needs a GPU: UNVERIFIED-LOCAL)."""
+    """Print the vLLM command for a serving profile (running it needs a CUDA GPU)."""
     import shlex
 
     from workbench.llm.serving import ServingProfile, vllm_command
@@ -444,7 +440,7 @@ def serve_probe(
     model: str | None = typer.Option(None, "--model", help="Default: llm.model."),
     only: str | None = typer.Option(None, "--only", help="native | text (default: both)."),
 ) -> None:
-    """Send one native-tools request and one `awm agent` text-protocol request to the service (U1)."""
+    """Send one native-tools request and one `awm agent` text-protocol request to the service."""
     from workbench.llm.probe import PROBES, ProbeError, failed, run_probe
 
     if only is not None and only not in PROBES:
@@ -523,7 +519,7 @@ def _print_event(e: dict[str, Any]) -> None:
 def demo_settings() -> Settings:
     """Offline demo: hand-written mini scenario + scripted mock LLM (query -> write -> approve).
 
-    The approval policy is the demo one, with one rule of each decision (owner decision D34); the
+    The approval policy is the demo one, with one rule of each decision; the
     default policy auto-approves nothing. WORKBENCH_APPROVAL__POLICY_FILE, set in the process
     environment, still picks another file.
     """
@@ -610,19 +606,19 @@ def synth_run(
             cache_dir=out / "llm_cache",
             ledger=Ledger(out / "ledger.jsonl"),
             prices=prices,
-            budget=s.budget,  # ADR-023
+            budget=s.budget,  # ADR-021
             currency=currency,
         )
         with ProxyThread(app, s.proxy_host, s.proxy_port) as base:
             result = runner.execute(proxy_base=base)
         console.print_json(data=result)
         for name, step in result["steps"].items():
-            if step.get("status") == "done_with_failures":  # ADR-024
+            if step.get("status") == "done_with_failures":  # ADR-022
                 console.print(
                     f"[yellow]step {name}: {step['failed_requests']} LLM request(s) ended in an upstream "
                     f"error ({step['failed_by_status']}); its output misses those parts[/yellow]"
                 )
-    except SynthInterrupted as exc:  # ADR-022: the step's processes are already stopped
+    except SynthInterrupted as exc:  # ADR-020: the step's processes are already stopped
         console.print(f"[yellow]{exc}[/yellow]")
         raise typer.Exit(code=130) from exc
     except SynthError as exc:
@@ -636,7 +632,7 @@ def synth_validate(run_dir: Path) -> None:
     from workbench.subprocess_env import generated_code_env
     from workbench.synth.runner import default_command_runner, validate_run
 
-    # Both run generated code and call no LLM: allowlisted variables only (ADR-019).
+    # Both run generated code and call no LLM: allowlisted variables only (ADR-017).
     report = validate_run(run_dir, default_command_runner, generated_code_env())
     console.print_json(data=report.as_dict())
 
@@ -678,7 +674,7 @@ def train_launch(
 
     s = get_settings()
     prof = TrainProfile.load(profile or s.train.smoke_config)
-    env = train_env(passthrough=s.train.env_passthrough)  # ADR-026
+    env = train_env(passthrough=s.train.env_passthrough)  # ADR-024
     checks = run_preflight(prof, s.upstream.agentfly_dir, s.train.project_dir, run=env_runner(env))
     try:
         plan = launch(prof, s.train.out_dir, s.train.project_dir, checks, execute=execute, env=env)
@@ -701,14 +697,14 @@ def results_check() -> None:
         console.print(f"[red]registry invalid: {exc}[/red]")
         raise typer.Exit(code=1) from exc
     whitelist = load_whitelist(root / "configs" / "number_whitelist.yaml")
-    files = default_targets(root, skip=whitelist["skip_files"])
+    files = default_targets(root)
     findings = scan(files, reg, whitelist, root)
     for f in findings:
         console.print(str(f), style="red", markup=False, highlight=False)
     unverified = sum(1 for e in reg.entries if not e.verified)
     console.print(
-        f"registry: {len(reg.entries)} entries ({unverified} unverified); scanned {len(files)} files "
-        f"({len(whitelist['skip_files'])} exempt as skip_files); {len(findings)} finding(s)"
+        f"registry: {len(reg.entries)} entries ({unverified} unverified); scanned {len(files)} files; "
+        f"{len(findings)} finding(s)"
     )
     raise typer.Exit(code=1 if findings else 0)
 

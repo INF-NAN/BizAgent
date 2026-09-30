@@ -1,7 +1,7 @@
 """Central configuration.
 
-Every port, path, timeout, concurrency limit and backend choice lives here (Phase 1 rule:
-no other module hard-codes them). Precedence, highest first:
+Every port, path, timeout, concurrency limit and backend choice lives here (no other
+module hard-codes them). Precedence, highest first:
 init kwargs > environment variables (``WORKBENCH_`` prefix, ``__`` nesting) > ``.env`` >
 ``configs/app.yaml`` (path overridable with ``WORKBENCH_CONFIG``) > defaults below.
 """
@@ -52,7 +52,7 @@ class EnvSettings(BaseModel):
     manager_url: str | None = None
     manager_host: str = "127.0.0.1"
     manager_port: int = 8090
-    # Shadow environments for approval previews (ADR-029) run beside the sessions and do not take a
+    # Shadow environments for approval previews (ADR-026) run beside the sessions and do not take a
     # max_envs slot; at most this many run at once, further previews wait (within their timeout).
     max_previews: int = Field(default=2, ge=1)
 
@@ -78,18 +78,18 @@ def _require_preview_default() -> dict[ApprovalRisk, bool]:
 
 
 class ApprovalSettings(BaseModel):
-    # Risk levels whose approval needs a successful preview (owner decision D29). true: a failed
-    # preview leaves only a rejection and no token is issued. false: the call can still be approved;
+    # Risk levels whose approval needs a successful preview. true: a failed preview leaves only a
+    # rejection and no token is issued. false: the call can still be approved;
     # the token is bound to "preview_unavailable", the audit records it and the UI shows 未预演.
     require_preview: dict[ApprovalRisk, bool] = Field(default_factory=_require_preview_default)
     # The whole preview: copy the DB, start the shadow server, call, diff, reclaim. 30 s is five times
     # the slowest total measured on the official e_commerce_33 scenario (scripts/measure_preview.py,
-    # docs/verification/logs/2026-09-25-preview-timing.log; ADR-029), rounded up to whole 5 s.
+    # ADR-026), rounded up to whole 5 s.
     preview_timeout_s: float = Field(default=30.0, gt=0)
     # Rows per table and kind shown on the approval card; the comparison always uses every key.
     preview_max_rows: int = Field(default=20, ge=1)
     # Ordered approval rules (auto_approve / require_human / deny), validated when the gateway
-    # starts (ADR-030). None: no rules, so write and destructive calls need a person.
+    # starts (ADR-027). None: no rules, so write and destructive calls need a person.
     policy_file: Path | None = None
 
 
@@ -106,7 +106,8 @@ class LLMSettings(BaseModel):
     backoff_max_s: float = 8.0
     stream: bool = True
     temperature: float = 0.6
-    # Includes thinking tokens on DeepSeek; ~8.5x the largest completion measured in Phase 12 (ADR-018).
+    # Includes thinking tokens on DeepSeek; ~8.5x the largest completion in the DeepSeek run on
+    # official e_commerce_33 (ADR-016).
     max_tokens: int = 8192
     mock_fixture: Path = Path("tests/fixtures/trajectories/e_commerce_33_basic.jsonl")
     # Demo only: rewind the mock script for every new session so the demo can be repeated.
@@ -117,7 +118,7 @@ class AgentSettings(BaseModel):
     max_steps: int = 12
     repeat_call_threshold: int = 3
     no_change_threshold: int = 4
-    # A full max_steps run on a 39-tool official scenario fits (measured, ADR-018).
+    # A full max_steps run on a 39-tool official scenario fits (arithmetic in ADR-016).
     token_budget: int = 240_000
     wall_clock_s: float = 300.0
     plan_retries: int = 2
@@ -141,10 +142,10 @@ class SynthSettings(BaseModel):
     proxy_port: int = 8095
     upstream_base_url_env: str = "OPENAI_BASE_URL"
     upstream_api_key_env: str = "OPENAI_API_KEY"
-    # Budget stop (ADR-023): once the run's ledger cost, in the pricing file's currency, reaches this
+    # Budget stop (ADR-021): once the run's ledger cost, in the pricing file's currency, reaches this
     # value the proxy refuses to forward and the current step fails. None disables it.
     budget: float | None = 5.0
-    # Requests of one step that may end in an upstream error after every retry (ADR-024). More fail
+    # Requests of one step that may end in an upstream error after every retry (ADR-022). More fail
     # the step (resumable); 1..max_failed_requests mark it done_with_failures, never done.
     max_failed_requests: int = Field(default=0, ge=0)
 
@@ -153,7 +154,7 @@ class TrainSettings(BaseModel):
     project_dir: Path = Path("train")
     smoke_config: Path = Path("configs/train/smoke.yaml")
     out_dir: Path = Path("data/train_runs")
-    # Variable names passed to the train env on top of its allowlist (ADR-026), e.g. a name the
+    # Variable names passed to the train env on top of its allowlist (ADR-024), e.g. a name the
     # allowlist drops that a machine turns out to need. Values are never logged.
     env_passthrough: list[str] = Field(default_factory=list)
 

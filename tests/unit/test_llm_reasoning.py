@@ -1,7 +1,7 @@
-"""reasoning_content pass-back (ADR-017), checked against a fake DeepSeek server.
+"""reasoning_content pass-back (ADR-015), checked against a fake DeepSeek server.
 
-The fake server follows the rules of https://api-docs.deepseek.com/guides/thinking_mode
-(read 2026-09-24): replies carry ``reasoning_content``; in strict mode a request with ``tools``
+The fake server follows the rules of https://api-docs.deepseek.com/guides/thinking_mode:
+replies carry ``reasoning_content``; in strict mode a request with ``tools``
 whose earlier assistant turns lack their ``reasoning_content`` gets HTTP 400.
 """
 
@@ -126,8 +126,8 @@ async def test_reasoning_content_is_captured(stream: bool) -> None:
 async def test_passed_back_on_tool_requests_only() -> None:
     fake = FakeDeepSeek(
         [
-            {"reasoning": "R1", "tool_calls": [tool_call("c1")]},
-            {"reasoning": "R2", "content": "done"},
+            {"reasoning": "thought-1", "tool_calls": [tool_call("c1")]},
+            {"reasoning": "thought-2", "content": "done"},
             {"content": "no tools"},
         ]
     )
@@ -138,7 +138,7 @@ async def test_passed_back_on_tool_requests_only() -> None:
     snapshot = copy.deepcopy(history)
     await b.chat(history, TOOLS)
     sent = [m for m in fake.requests[1]["messages"] if m["role"] == "assistant"]
-    assert sent[0]["reasoning_content"] == "R1"
+    assert sent[0]["reasoning_content"] == "thought-1"
     assert history == snapshot  # the caller's (LangGraph state) dicts are not modified
     await b.chat(history, None)  # no tools: not needed, not sent
     assert all("reasoning_content" not in m for m in fake.requests[2]["messages"])
@@ -148,8 +148,8 @@ async def test_passed_back_on_tool_requests_only() -> None:
 async def test_final_answer_turn_and_replanned_system_prompt() -> None:
     fake = FakeDeepSeek(
         [
-            {"reasoning": "R1", "tool_calls": [tool_call("c1")]},
-            {"reasoning": "R2", "content": "answer"},
+            {"reasoning": "thought-1", "tool_calls": [tool_call("c1")]},
+            {"reasoning": "thought-2", "content": "answer"},
             {"content": "again"},
         ]
     )
@@ -166,7 +166,7 @@ async def test_final_answer_turn_and_replanned_system_prompt() -> None:
     history[0] = {"role": "system", "content": "plan v2"}  # re-planning rebuilds the system prompt
     await b.chat(history, TOOLS)
     sent = [m.get("reasoning_content") for m in fake.requests[2]["messages"] if m["role"] == "assistant"]
-    assert sent == ["R1", "R2"]  # also the turn without a tool call
+    assert sent == ["thought-1", "thought-2"]  # also the turn without a tool call
     await b.aclose()
 
 

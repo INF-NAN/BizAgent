@@ -12,7 +12,7 @@ Node = Callable[[AgentState], Awaitable[dict[str, Any]]]
 def make_intake(deps: AgentDeps) -> Node:
     async def intake(state: AgentState) -> dict[str, Any]:
         sid = state["session_id"]
-        # Tool list and descriptions are pulled from the gateway at runtime (Phase 5 rule).
+        # Tool list and descriptions are pulled from the gateway at runtime, never hard-coded (ADR-009).
         tools = [t.as_dict(deps.gateway.requires_approval(sid, t.name)) for t in deps.gateway.list_tools(sid)]
         memories = (
             [m.as_dict() for m in deps.memory.list(state.get("user_id", "default"))] if deps.memory else []

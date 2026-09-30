@@ -1,4 +1,4 @@
-"""Phase 5 acceptance scenarios on CPU with the mock LLM (mechanisms only — no quality claims)."""
+"""End-to-end agent scenarios on CPU with the mock LLM (mechanisms only — no quality claims)."""
 
 from __future__ import annotations
 
@@ -142,7 +142,7 @@ async def test_trace_persisted(tmp_path: Path) -> None:
 
 
 async def test_act_request_carries_tool_definitions_once(tmp_path: Path) -> None:
-    # ADR-018: the act system prompt holds names and risk only; schemas go in the tools parameter
+    # ADR-016: the act system prompt holds names and risk only; schemas go in the tools parameter
     from typing import Any
 
     from tests.unit.agent_harness import FIX

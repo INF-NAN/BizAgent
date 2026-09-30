@@ -65,7 +65,7 @@ def tools_risk_table(tools: list[dict[str, Any]]) -> str:
 
 
 def act_system_prompt(prompt_text: str, steps: list[dict[str, Any]], tools: list[dict[str, Any]]) -> str:
-    """System prompt of the act step (ADR-018): the act prompt, the plan and a name/risk table.
+    """System prompt of the act step (ADR-016): the act prompt, the plan and a name/risk table.
 
     Full tool definitions (descriptions and argument schemas) are sent once, as the request's
     native ``tools`` parameter (``act`` node -> ``llm_tools``), not repeated here.

@@ -25,9 +25,9 @@ class PendingCall(TypedDict):
     name: str
     arguments: dict[str, Any]
     risk: str
-    # the gateway's signed preview record, for calls that need approval (ADR-029)
+    # the gateway's signed preview record, for calls that need approval (ADR-026)
     preview: NotRequired[dict[str, Any] | None]
-    # the approval policy's answer: decision, deciding rule id (None: the default), reason (ADR-030)
+    # the approval policy's answer: decision, deciding rule id (None: the default), reason (ADR-027)
     policy: NotRequired[dict[str, Any] | None]
 
 

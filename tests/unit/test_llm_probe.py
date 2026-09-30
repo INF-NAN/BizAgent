@@ -1,4 +1,4 @@
-"""`workbench serve probe` against a fake vLLM service (U1): its verdicts and the requests it sends.
+"""`workbench serve probe` against a fake vLLM service: its verdicts and the requests it sends.
 
 The command runs in a subprocess: the text probe imports AWM, whose import chain loads sklearn and
 sets KMP_* variables, and that must not leak into this test process. No model is called.

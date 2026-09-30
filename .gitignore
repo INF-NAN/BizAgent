@@ -13,7 +13,7 @@ dist/
 # Secrets
 .env
 
-# Data, runs and model artifacts (never committed; see rule R6)
+# Data, runs and model artifacts are never committed (datasets and weights are downloaded)
 data/
 outputs/
 *.db

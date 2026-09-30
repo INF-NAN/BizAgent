@@ -1,4 +1,4 @@
-"""Children that run generated code see no secrets (ADR-019): real child processes."""
+"""Children that run generated code see no secrets (ADR-017): real child processes."""
 
 from __future__ import annotations
 

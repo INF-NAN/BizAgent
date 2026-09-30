@@ -38,7 +38,7 @@ async def test_remote_client_against_http_control_plane(tmp_path: Path) -> None:
 
 
 async def test_remote_preview_and_checkpoints_over_http(tmp_path: Path) -> None:
-    """Approval previews through the env-manager's HTTP control plane (ADR-029)."""
+    """Approval previews through the env-manager's HTTP control plane (ADR-026)."""
     import sqlite3
     from contextlib import closing
     from typing import Any

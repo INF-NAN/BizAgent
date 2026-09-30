@@ -48,7 +48,7 @@ table { width: 100%; border-collapse: collapse; } td, th { text-align: left; pad
 .timeline .t { color: var(--muted); } code, pre { font-family: ui-monospace, monospace; font-size: 12px; }
 .memory { padding-left: 16px; font-size: 12px; }
 .viewer-step { border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin: 6px 0; }
-/* approval previews (ADR-029) */
+/* approval previews (ADR-026) */
 .preview-box { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .preview-box.unpreviewed { border: 2px solid var(--danger); }
 .preview-head { margin: 2px 0 6px; }

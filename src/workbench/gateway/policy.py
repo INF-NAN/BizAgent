@@ -49,7 +49,7 @@ class PolicyConfig:
 
 def needs_approval_by_default(risk: str, config: PolicyConfig) -> bool:
     """Whether a call of this risk level needs approval when no approval rule matches: write and
-    destructive always (ADR-030); read only if the tool policy's ``require_approval`` lists it."""
+    destructive always (ADR-027); read only if the tool policy's ``require_approval`` lists it."""
     return risk in ("write", "destructive") or risk in config.require_approval
 
 
@@ -76,7 +76,7 @@ def _tokens(name: str, description: str) -> list[str]:
     return tokens
 
 
-# Minimum risk implied by the route's HTTP method (ADR-015). GET and unknown methods add nothing.
+# Minimum risk implied by the route's HTTP method (ADR-006). GET and unknown methods add nothing.
 METHOD_FLOOR: dict[str, RiskLevel] = {
     "POST": "write",
     "PUT": "write",
@@ -105,7 +105,7 @@ def classify(
 
     ``http_method`` comes from the offline catalog (``envs.catalog.route_methods``); ``None``
     (tool not in the catalog) keeps the heuristic result unchanged. Overrides are reviewed
-    human decisions and are applied as written (ADR-015).
+    human decisions and are applied as written (ADR-006).
     """
     for key in ([f"{scenario}__{tool}"] if scenario else []) + [tool]:
         if key in config.overrides:
@@ -124,7 +124,7 @@ class ApprovalError(PermissionError):
     """Missing, forged, expired, mismatched or already-used approval token."""
 
 
-# The preview binding of a token approved without a successful preview (ADR-029)
+# The preview binding of a token approved without a successful preview (ADR-026)
 PREVIEW_UNAVAILABLE = "preview_unavailable"
 # Fields of a preview record covered by its signature (the digest covers the changes)
 PREVIEW_SIGNED = ("id", "session_id", "tool", "args_digest", "status", "digest")

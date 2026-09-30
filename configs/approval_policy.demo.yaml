@@ -1,4 +1,4 @@
-# Demo approval policy (ADR-030, owner decision D34): one rule of each decision. Used by
+# Demo approval policy (ADR-027): one rule of each decision. Used by
 # `make demo-mock` (workbench api serve --demo), the docker smoke test (scripts/docker_smoke.py) and
 # the tests. It is not the default: configs/approval_policy.yaml auto-approves nothing, and the
 # fields and decisions are documented there.

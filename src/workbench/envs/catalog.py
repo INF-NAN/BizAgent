@@ -1,12 +1,12 @@
 """Scenario catalog built from an AWM-format dataset directory (e.g. data/awm1k/).
 
-Counts are derived offline from the dataset files (field layout: docs/RECON.md §1.6):
-tool count = number of ``operation_id=`` route declarations in ``full_code`` (fastapi-mcp
-names each tool after the route's operationId, see RECON §1.2); tasks from gen_tasks.jsonl;
+Counts are derived offline from the dataset files (field layout: docs/UPSTREAM.md §6.6):
+tool count = number of ``operation_id=`` route declarations in ``full_code`` (fastapi-mcp names
+each tool after the route's operationId, fastapi_mcp/server.py:619); tasks from gen_tasks.jsonl;
 tables from gen_db.jsonl ``db_schema.tables``. The official dataset is only read, never written.
 
 ``route_methods`` maps each tool to the HTTP method of its route (the gateway uses it as a
-risk floor, ADR-015). It parses ``full_code`` with ``ast`` instead of executing it.
+risk floor, ADR-006). It parses ``full_code`` with ``ast`` instead of executing it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import ast
 import json
 import re
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -80,11 +80,6 @@ def build_catalog(dataset_dir: Path) -> list[ScenarioInfo]:
 def search(catalog: list[ScenarioInfo], keyword: str) -> list[ScenarioInfo]:
     kw = keyword.lower()
     return [s for s in catalog if kw in s.name or any(kw in t for t in s.tool_names)]
-
-
-def save_index(catalog: list[ScenarioInfo], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([asdict(s) for s in catalog], indent=1), encoding="utf-8")
 
 
 def load_tasks(dataset_dir: Path, scenario: str) -> list[str]:

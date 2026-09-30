@@ -196,7 +196,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HTTPException(404, "no pending approval for this session")
         preview = pending.get("preview") or {}
         if body.approved and preview and not preview.get("approvable", True):
-            # approval.require_preview is on for this risk level and the preview failed (ADR-029)
+            # approval.require_preview is on for this risk level and the preview failed (ADR-026)
             raise HTTPException(
                 409,
                 f"a {pending.get('risk')} call needs a successful preview before approval; "
@@ -235,7 +235,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             "ok": True,
             "sessions": len(rt.sessions),
             "llm_backend": settings.llm.backend,
-            # which approval policy is in force (ADR-030); the docker smoke test checks it
+            # which approval policy is in force (ADR-027); the docker smoke test checks it
             "approval_policy": {
                 "file": str(policy_file) if policy_file is not None else None,
                 "rules": [f"{r.id} ({r.decision})" for r in rt.gateway.approval_policy.rules],

@@ -1,4 +1,4 @@
-"""Mid-step interruption and the budget stop, end to end against a local fake upstream (D17).
+"""Mid-step interruption and the budget stop, end to end against a local fake upstream.
 
 Real processes throughout: the driver runs SynthRunner and the workbench proxy, every step is a
 subprocess that talks to the proxy, and the fake upstream listens on a real port. No paid API.

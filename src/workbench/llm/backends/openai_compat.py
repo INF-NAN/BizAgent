@@ -5,7 +5,7 @@ read timeout alone cannot stop a stream that trickles one byte just before every
 ("half-open" hang); layer 2 — the overall wall-clock cap — lives in ``LLMClient``.
 
 Servers that return ``reasoning_content`` (DeepSeek thinking mode) get it back on later
-requests that carry ``tools``, as their documentation requires (``llm/reasoning.py``, ADR-017).
+requests that carry ``tools``, as their documentation requires (``llm/reasoning.py``, ADR-015).
 """
 
 from __future__ import annotations

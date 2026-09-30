@@ -76,7 +76,7 @@ TOOLS = [
 
 
 def test_act_system_prompt_lists_names_and_risk_only() -> None:
-    # ADR-018: full definitions travel once, as the native tools parameter
+    # ADR-016: full definitions travel once, as the native tools parameter
     steps = [{"description": "find it", "tool": "sc__search", "changes_data": False}]
     system = act_system_prompt("ACT PROMPT", steps, TOOLS)
     assert system.startswith("ACT PROMPT") and '"description": "find it"' in system
@@ -91,7 +91,7 @@ def test_act_prompt_version_bumped() -> None:
 
 
 def test_defaults_follow_the_measurements() -> None:
-    # ADR-018: measured on official e_commerce_33 (39 tools) in Phase 12 / 12.5
+    # ADR-016: derived from the DeepSeek run on official e_commerce_33 (39 tools)
     from workbench.config import AgentSettings, LLMSettings, Settings
 
     assert AgentSettings().token_budget == 240_000 and LLMSettings().max_tokens == 8192

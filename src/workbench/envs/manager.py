@@ -4,14 +4,14 @@ Per session it (1) builds a private copy of the scenario DB under ``data/runs/<s
 (2) leases a port, (3) launches AWM's server in its **own process group**
 (``start_new_session=True``) so that stopping it also kills the ``sh | tee`` pipeline AWM
 spawns internally (awm/core/server.py:163) — killing only the launcher leaves the real
-server orphaned (observed in Phase 2, see docs/RECON.md §9), (4) polls an `awm env check`
+server orphaned (docs/UPSTREAM.md §6.2), (4) polls an `awm env check`
 equivalent health check with a deadline, and (5) supervises the process afterwards
 (crash -> ``unhealthy``, idle -> reaped, main-process exit -> everything killed).
 Concurrency is bounded by a semaphore; callers beyond the limit queue up to a timeout.
 
 ``preview`` runs one tool call on a shadow copy of a session's current DB, on a leased port
 and in its own process group, and reports the changes; ``checkpoint``/``changes_since`` measure
-what a real call changed (approval previews, ADR-029).
+what a real call changed (approval previews, ADR-026).
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ class EnvHandle:
     process: subprocess.Popen[bytes] | None = field(default=None, repr=False)
     error: str | None = None
     tools: list[str] = field(default_factory=list)
-    # tool -> HTTP method of its route, from the scenario's offline code (risk floor, ADR-015)
+    # tool -> HTTP method of its route, from the scenario's offline code (risk floor, ADR-006)
     tool_methods: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -243,7 +243,7 @@ class EnvManager:
             temp_server_path=run_dir / "temp_server.py",
             output_dir=run_dir / "awm_server",
         )
-        # The server runs the scenario's generated code: allowlisted variables only (ADR-019).
+        # The server runs the scenario's generated code: allowlisted variables only (ADR-017).
         env = generated_code_env()
         now = self._clock()
         handle = EnvHandle(
@@ -486,7 +486,7 @@ class EnvManager:
             output_dir=shadow.dir / "awm_server",
         )
         log = shadow.dir / "launcher.log"
-        # generated code runs here as well: allowlisted variables only (ADR-019)
+        # generated code runs here as well: allowlisted variables only (ADR-017)
         shadow.process = self._launcher.launch(cmd, log, generated_code_env())
         host = "127.0.0.1" if s.host in ("0.0.0.0", "") else s.host  # this process calls it
         url = f"http://{host}:{shadow.port}/mcp"

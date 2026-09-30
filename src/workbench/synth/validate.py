@@ -50,7 +50,7 @@ class ValidationReport:
     failed: dict[str, str] = field(default_factory=dict)
     failure_categories: dict[str, int] = field(default_factory=dict)
     tools_per_env: dict[str, int] = field(default_factory=dict)
-    # gen steps whose LLM requests ended in upstream errors (ADR-024), from the run's state.json
+    # gen steps whose LLM requests ended in upstream errors (ADR-022), from the run's state.json
     request_failures: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -86,7 +86,7 @@ class ValidationReport:
                 "## gen steps with failed LLM requests",
                 "",
                 "These requests ended in an upstream error after every retry; AWM wrote empty results",
-                "for them, so the step's output is missing those parts (ADR-024).",
+                "for them, so the step's output is missing those parts (ADR-022).",
                 "",
                 "| step | status | failed requests | by last error |",
                 "|---|---|---|---|",

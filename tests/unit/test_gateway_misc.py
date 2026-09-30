@@ -28,27 +28,27 @@ def test_rate_limiter_is_per_session_and_tool() -> None:
 
 # --- audit redaction -------------------------------------------------------------
 def test_redacts_email_phone_card() -> None:
-    text = "mail bob@example.com call +1 (555) 123-4567 card 4242 4242 4242 4242 on 2026-09-24"
+    text = "mail bob@example.com call +1 (555) 123-4567 card 4242 4242 4242 4242 on 2026-03-14"
     out = redact_text(text)
     assert "bob@example.com" not in out and "[EMAIL]" in out
     assert "555" not in out and "[PHONE]" in out
     assert "4242 4242" not in out and "[CARD ****4242]" in out
-    assert "2026-09-24" in out  # dates are not phone numbers
+    assert "2026-03-14" in out  # dates are not phone numbers
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        "2026-09-24T17:05:31.506430",  # ISO 8601 with microseconds (AWM's created_at)
-        "2026-09-24T17:05:31.506430+00:00",
-        "2026-09-24 17:05:31.506430",  # space separator
-        "2026-09-23 17:05:16",  # SQLite CURRENT_TIMESTAMP format in the official DB rows
+        "2026-03-14T17:05:31.506430",  # ISO 8601 with microseconds (AWM's created_at)
+        "2026-03-14T17:05:31.506430+00:00",
+        "2026-03-14 17:05:31.506430",  # space separator
+        "2026-03-13 17:05:16",  # SQLite CURRENT_TIMESTAMP format in the official DB rows
         "17:05:31.506430",
-        '{"created_at": "2026-09-24T17:05:31.506430", "updated_at": "2026-09-24T17:05:31.506430"}',
+        '{"created_at": "2026-03-14T17:05:31.506430", "updated_at": "2026-03-14T17:05:31.506430"}',
     ],
 )
 def test_timestamps_are_not_redacted(text: str) -> None:
-    # observed in the Phase 12 audit log: "17:05:31.506430" became "17:05:[PHONE]" (ADR-016)
+    # a phone pattern without these guards turns "17:05:31.506430" into "17:05:[PHONE]" (ADR-014)
     assert redact_text(text) == text
 
 
@@ -64,7 +64,7 @@ def test_timestamps_are_not_redacted(text: str) -> None:
         "tel:+15551234567",
         "Tel:5551234567",
         "phone: 555-123-4567",
-        "reached at 555-123-4567 on 2026-09-24T17:05:31.506430",
+        "reached at 555-123-4567 on 2026-03-14T17:05:31.506430",
     ],
 )
 def test_real_phone_numbers_are_still_redacted(text: str) -> None:
@@ -73,9 +73,9 @@ def test_real_phone_numbers_are_still_redacted(text: str) -> None:
 
 
 def test_summary_keeps_timestamps_of_a_real_tool_result() -> None:
-    # add_item_to_cart result from the Phase 12 run on official e_commerce_33
-    result = {"cart_item": {"id": 4, "cart_id": 1, "created_at": "2026-09-24T17:05:31.506430"}}
-    assert "2026-09-24T17:05:31.506430" in summarize(result, 300)
+    # add_item_to_cart result shape of official e_commerce_33
+    result = {"cart_item": {"id": 4, "cart_id": 1, "created_at": "2026-03-14T17:05:31.506430"}}
+    assert "2026-03-14T17:05:31.506430" in summarize(result, 300)
 
 
 def test_redact_nested_and_summary() -> None:
@@ -110,7 +110,7 @@ def test_empty_is_not_error() -> None:
 
 
 def test_wrapped_empty_lists_are_empty() -> None:
-    # shapes returned by the official e_commerce_33 environment (2026-09-24)
+    # shapes returned by the official e_commerce_33 environment
     for text in ['{"products": [], "total": 0}', '{"cart_id": 1, "items": []}', '{"items": []}']:
         assert is_empty_payload(text), text
     for text in [
@@ -123,7 +123,7 @@ def test_wrapped_empty_lists_are_empty() -> None:
 
 
 def test_writes_are_never_empty() -> None:
-    # successful write whose result has only empty lists (official social_media_4, 2026-09-24)
+    # successful write whose result has only empty lists (official social_media_4)
     text = '{"user_id": 1, "hide_subreddit_ids": [], "nsfw_blur_enabled": true}'
     assert normalize("patch_hidden_subreddits", False, text).status == "empty"  # as a query
     assert normalize("patch_hidden_subreddits", False, text, read_only=False).status == "ok"

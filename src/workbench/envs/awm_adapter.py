@@ -1,4 +1,4 @@
-"""The only place that knows how to call AWM (rule R4 references in docs/RECON.md).
+"""The only place that knows how to call AWM (interface notes: docs/UPSTREAM.md §6).
 
 - DB creation uses AWM's Python interface ``awm.core.reset.reset_single_database``
   (third_party/agent-world-model/awm/core/reset.py:53-100).

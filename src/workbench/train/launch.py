@@ -1,9 +1,10 @@
 """`workbench train launch`: run the smoke profile in the separate train env (subprocess only).
 
 Dry-run by default; `--execute` also requires every preflight check to pass. The run
-directory always gets a NO_RESULTS marker (rule R2). The training process gets the allowlisted
-environment of ``workbench.subprocess_env.train_env`` (ADR-026); the plan and ``env_names.json``
-list the variable names it gets and the ones it does not, never their values.
+directory always gets a NO_RESULTS marker, so nothing it writes passes as a result. The training
+process gets the allowlisted environment of ``workbench.subprocess_env.train_env`` (ADR-024); the
+plan and ``env_names.json`` list the variable names it gets and the ones it does not, never their
+values.
 """
 
 from __future__ import annotations
@@ -83,7 +84,7 @@ def launch(
     execute: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Plan or run the smoke training in ``env`` (default ``train_env()``, ADR-026)."""
+    """Plan or run the smoke training in ``env`` (default ``train_env()``, ADR-024)."""
     env = dict(train_env() if env is None else env)
     placeholder = out_root / "<timestamp>_smoke"
     command = build_command(profile, placeholder, train_project)
@@ -97,7 +98,7 @@ def launch(
         return plan
     failed = [c.name for c in preflight if c.status == "fail"]
     if failed:
-        raise LaunchError(f"preflight failed: {failed} (UNVERIFIED-LOCAL without a GPU)")
+        raise LaunchError(f"preflight failed: {failed}; run `workbench train preflight` for details")
     run_dir = prepare_run_dir(out_root, profile, [])
     command = build_command(profile, run_dir, train_project)
     (run_dir / "command.json").write_text(json.dumps(command, indent=1), encoding="utf-8")

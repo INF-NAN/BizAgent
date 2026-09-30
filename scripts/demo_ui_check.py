@@ -48,7 +48,7 @@ def main() -> None:
         page.wait_for_function("document.querySelector('#session-info').textContent.startsWith('session')")
         page.fill("#message", REQUEST)
         page.click("#send")
-        # the preview runs a shadow environment first (a few seconds, ADR-029)
+        # the preview runs a shadow environment first (a few seconds, ADR-026)
         page.wait_for_selector("#approval:not(.hidden)", timeout=60000)
         page.wait_for_selector("#approval-body .preview-box", timeout=5000)
         print("approval card:", page.inner_text("#approval-body").replace("\n", " ")[:300])

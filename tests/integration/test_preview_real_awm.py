@@ -1,4 +1,4 @@
-"""Approval previews on a real AWM server (ADR-029, owner decision D29).
+"""Approval previews on a real AWM server (ADR-026).
 
 A shadow environment is started by the env-manager from a copy of the session's current DB, the
 same call runs there, its changes are diffed, and the shadow is reclaimed. The approved call then

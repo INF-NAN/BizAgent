@@ -1,4 +1,4 @@
-"""`workbench verify` against the real `awm verify` (ADR-025, owner decision D13a).
+"""`workbench verify` against the real `awm verify` (ADR-023).
 
 The test plants secrets in the environment `workbench verify` is started with, and a verifier
 whose code reports what it can see from inside `awm verify`. The sql judge is a local fake
@@ -100,7 +100,7 @@ def seen_by_verifier(out: Path, mode: str) -> dict[str, Any]:
 
 
 def test_control_awm_verify_with_the_full_environment_sees_every_key(tmp_path: Path) -> None:
-    # how Phase 12 ran it: `awm verify` straight from a shell that holds the keys
+    # the control: plain `awm verify` started from a shell that holds the keys
     out = agent_output(tmp_path)
     verifier = verifier_file(tmp_path, "pure_code.jsonl", "verify_task_completion")
     argv = verify_argv(out, "code", verifier)

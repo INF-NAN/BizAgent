@@ -1,4 +1,4 @@
-"""The approval policy enforced by the gateway (ADR-030, owner decision D32): auto_approve issues the
+"""The approval policy enforced by the gateway (ADR-027): auto_approve issues the
 token on the policy's behalf without a preview, deny refuses even with a token, require_human needs
 a person, destructive calls are never approved by the policy, and every audit line names the rule.
 """
@@ -73,7 +73,7 @@ async def test_auto_approved_write_runs_without_a_preview_and_is_measured(tmp_pa
     assert out.preview_check == {
         "result": "preview_unavailable",
         "reason": "auto-approved by approval policy rule small-add; no preview is run",
-        "actual": "cart_items +1",  # the real change is still measured (D32)
+        "actual": "cart_items +1",  # the real change is still measured
     }
     assert [c[0] for c in backend.calls] == ["checkpoint", "changes_since"]  # no preview was run
     assert out.policy is not None and (out.policy["decision"], out.policy["rule"]) == (
@@ -152,7 +152,7 @@ async def test_the_gateway_never_approves_a_destructive_call_on_the_policys_beha
 
 async def test_write_and_destructive_always_need_approval_without_a_rule(tmp_path: Path) -> None:
     """The tool policy's require_approval can add read, but cannot exempt write or destructive:
-    only an auto_approve rule does (ADR-030)."""
+    only an auto_approve rule does (ADR-027)."""
     lax = PolicyConfig.load(Path("configs/tool_policy.yaml"))
     lax = PolicyConfig(lax.verbs, lax.unknown_default, frozenset({"destructive"}), {}, 10, 1)
     g, up = await gateway(tmp_path, [], policy=lax)
@@ -177,7 +177,7 @@ def test_the_policy_file_is_validated_when_the_gateway_starts(tmp_path: Path) ->
     shipped = Gateway(settings, approval=ApprovalSettings(policy_file=default))
     assert shipped.approval_policy.rules[0].id == "no-payment-method-deletion"
     assert shipped.approval_policy_file == default
-    # the default auto-approves nothing; the demo policy has one rule of each decision (D34)
+    # the default auto-approves nothing; the demo policy has one rule of each decision
     assert "auto_approve" not in {r.decision for r in shipped.approval_policy.rules}
     demo = Gateway(settings, approval=ApprovalSettings(policy_file=Path("configs/approval_policy.demo.yaml")))
     assert [r.decision for r in demo.approval_policy.rules] == ["deny", "require_human", "auto_approve"]

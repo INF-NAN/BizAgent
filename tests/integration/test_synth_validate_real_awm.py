@@ -25,7 +25,7 @@ def test_validate_run_on_generated_like_dir(tmp_path: Path) -> None:
         run / "databases" / "mini_e_commerce.db"
     )  # as `awm gen env --database_dir` writes it
     (run / "gen_envs.jsonl").write_text(json.dumps(env_row) + "\n")
-    # the allowlisted environment (ADR-019) is enough for real reset_db + check_all
+    # the allowlisted environment (ADR-017) is enough for real reset_db + check_all
     report = validate_run(run, default_command_runner, generated_code_env()).as_dict()
     assert report["environments_total"] == 1
     assert report["environments_started"] == 1 and report["tools_total"] == 7

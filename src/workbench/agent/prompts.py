@@ -1,4 +1,8 @@
-"""Versioned prompt files (src/workbench/agent/prompts/*.md). Changes go to docs/CHANGELOG.md."""
+"""Versioned prompt files (src/workbench/agent/prompts/*.md).
+
+Each file starts with a ``<!-- prompt: <name> | version: <n> -->`` header; a changed prompt gets a
+new version, recorded in docs/ARCHITECTURE.md §4 (Prompt 版本).
+"""
 
 from __future__ import annotations
 

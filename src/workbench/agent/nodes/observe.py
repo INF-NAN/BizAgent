@@ -20,7 +20,7 @@ def make_observe(deps: AgentDeps) -> Node:
         )
         deps.hub.emit(sid, "tool_call", **outcome.as_dict(), arguments=pc["arguments"])
         check = outcome.preview_check or {}
-        if check.get("result") == "preview_mismatch":  # flagged in the UI (ADR-029)
+        if check.get("result") == "preview_mismatch":  # flagged in the UI (ADR-026)
             deps.hub.emit(sid, "preview_mismatch", tool=pc["name"], differences=check.get("differences"))
         payload: dict[str, Any] = {"status": outcome.status}
         if outcome.error:

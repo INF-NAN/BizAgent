@@ -4,14 +4,14 @@ Clients connect to ``/mcp`` and identify their session with the ``X-Workbench-Se
 header. ``list_tools`` returns the session's allowlisted tools with ``<scenario>__`` prefixes;
 ``call_tool`` goes through Gateway.call_tool (policy, rate limit, audit, normalization).
 Calls the approval policy sends to a person (write and destructive, unless a rule says otherwise;
-ADR-030) need a one-time token in ``X-Approval-Token`` issued by the application layer
+ADR-027) need a one-time token in ``X-Approval-Token`` issued by the application layer
 (``POST /admin/approvals`` here, or the API's approval flow); for an ``auto_approve`` rule the
 gateway issues the token itself. Every human token is
-bound to a preview (ADR-029): ``POST /admin/previews`` runs one and returns its record, and
+bound to a preview (ADR-026): ``POST /admin/previews`` runs one and returns its record, and
 ``/admin/approvals`` takes its ``preview_id`` or runs the preview itself before issuing, and
-refuses (409) a call the approval policy denies (ADR-030).
+refuses (409) a call the approval policy denies (ADR-027).
 
-MCP SDK 1.26.0 facts used (docs/RECON.md): lowlevel ``Server.call_tool(validate_input=...)``
+MCP SDK 1.26.0 facts used (docs/UPSTREAM.md §10.2): lowlevel ``Server.call_tool(validate_input=...)``
 (mcp/server/lowlevel/server.py:492) accepts a returned ``CallToolResult`` as-is (:539-540);
 ``server.request_context.request`` carries the HTTP request (:758);
 ``StreamableHTTPSessionManager(app, json_response, stateless)`` (streamable_http_manager.py:60-65).
@@ -97,7 +97,7 @@ class RegisterRequest(BaseModel):
     scenario: str
     url: str
     allowlist: list[str] | None = None
-    # tool -> HTTP method from the offline catalog (risk floor, ADR-015); omit if unknown
+    # tool -> HTTP method from the offline catalog (risk floor, ADR-006); omit if unknown
     tool_methods: dict[str, str] = {}
 
 
@@ -148,7 +148,7 @@ def create_gateway_app(gateway: Gateway) -> Starlette:
         record = None
         try:
             verdict = gateway.approval_verdict(req.session_id, req.tool, req.arguments)
-            if verdict.decision == "deny":  # nobody can approve it, so do not run a preview (ADR-030)
+            if verdict.decision == "deny":  # nobody can approve it, so do not run a preview (ADR-027)
                 reason = f"the approval policy refuses this call ({verdict.reason}); nobody can approve it"
                 return JSONResponse({"error": reason, "policy": verdict.as_dict()}, status_code=409)
             record = (

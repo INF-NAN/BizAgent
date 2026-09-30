@@ -1,4 +1,4 @@
-"""Gateway side of approval previews (ADR-029, owner decision D29), with a fake preview backend.
+"""Gateway side of approval previews (ADR-026), with a fake preview backend.
 
 The backend's change records come from real SQLite files (workbench.envs.changes), so their
 format is the one the env-manager produces; the shadow environment itself is covered by

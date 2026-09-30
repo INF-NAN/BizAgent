@@ -1,13 +1,13 @@
 """Normalize upstream MCP results into ok / empty / error with actionable hints.
 
-Upstream shapes (measured against the real AWM launcher, docs/RECON.md §10 Phase 2):
+Upstream shapes (from the real AWM launcher; docs/UPSTREAM.md §6.3):
 - ``Input validation error: 'x' is not one of ['a', 'b']``   (MCP SDK jsonschema check)
 - ``Input validation error: 'field' is a required property``
-- ``Input validation error: 'abc' is not of type 'integer'`` (official e_commerce_33, 2026-09-24)
+- ``Input validation error: 'abc' is not of type 'integer'`` (official e_commerce_33)
 - ``Error calling <tool>. Status code: <N>. Response: <body>`` (fastapi-mcp, server.py:558-561)
 - a successful call whose text is ``[]`` / ``{}`` / ``null`` / empty -> EMPTY, never an error.
 - official AgentWorldModel-1K environments wrap lists in an object, e.g.
-  ``{"products": [], "total": 0}`` or ``{"cart_id": 1, "items": []}`` -> also EMPTY (ADR-014).
+  ``{"products": [], "total": 0}`` or ``{"cart_id": 1, "items": []}`` -> also EMPTY (ADR-007).
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def normalize(
 
     EMPTY means "the query matched nothing"; it is meaningless for a write whose result
     happens to contain only empty lists, e.g. ``{"user_id": 1, "hide_subreddit_ids": []}``
-    after removing every hidden id (observed on official social_media_4, ADR-014).
+    after removing every hidden id (observed on official social_media_4, ADR-007).
     """
     if not is_error:
         if read_only and is_empty_payload(text):

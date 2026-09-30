@@ -1,4 +1,4 @@
-"""Row-level database changes for approval previews, and their structural comparison (ADR-029).
+"""Row-level database changes for approval previews, and their structural comparison (ADR-026).
 
 ``snapshot.diff`` lists the primary keys that changed. A preview also needs the rows themselves
 (what the approver sees: "the rows this call will change") and, for every changed row, the
@@ -6,8 +6,8 @@ columns that changed (what is compared with the real call afterwards).
 
 The comparison is structural only: changed tables; added, removed and changed keys; the names of
 the changed columns. Volatile columns are kept in the rows but never compared, and every
-comparison says which columns it ignored. The basis for the rules below is in docs/RECON.md
-("Phase 17"):
+comparison says which columns it ignored. The basis for the rules below is in
+docs/UPSTREAM.md §10.3:
 
 - time columns: a declared type containing DATE or TIME (DATETIME, DATE, TIME, TIMESTAMP), a
   time default (CURRENT_TIMESTAMP, datetime('now'), ...) or a time-like name (``*_at``,

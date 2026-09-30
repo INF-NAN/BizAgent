@@ -1,4 +1,4 @@
-"""`workbench verify`: run `awm verify` on an `awm agent` output without handing it a key (ADR-025).
+"""`workbench verify`: run `awm verify` on an `awm agent` output without handing it a key (ADR-023).
 
 `awm verify` executes the dataset's verifier code in its own process, with `os` in the namespace
 (awm/core/verify.py:104-126, 151-174), and in sql mode that same process reads the judge's key
@@ -6,7 +6,7 @@ from its environment (awm/core/verify.py:417-419, awm/tools.py:386-437). This wr
 key out of that process:
 
 - ``code`` mode never calls an LLM (only sql mode runs the judge, awm/core/verify.py:416-433): the
-  process gets only the allowlist of ADR-019.
+  process gets only the allowlist of ADR-017.
 - ``sql`` mode sends the judge's request through the local proxy (workbench.synth.proxy): the
   process gets the allowlist, the proxy's address, a placeholder key and the judge model, while
   the judge's real address and key stay in this process. The proxy writes a ledger next to the
@@ -53,7 +53,7 @@ def verify_argv(
 
 
 def verify_env(environ: dict[str, str], proxy_base: str | None = None, model: str = "") -> dict[str, str]:
-    """The allowlist of ADR-019; behind the proxy (sql mode) also its address, a placeholder key
+    """The allowlist of ADR-017; behind the proxy (sql mode) also its address, a placeholder key
     and the judge model, which is all `resolve_llm_config` reads (awm/tools.py:386-437)."""
     env = generated_code_env(environ)
     if proxy_base is not None:

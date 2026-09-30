@@ -1,4 +1,4 @@
-# MCP gateway tool policy (Phase 3). Deny-first: a tool must be on the session allowlist.
+# MCP gateway tool policy. Deny-first: a tool must be on the session allowlist.
 #
 # Risk classification is a verb heuristic over the tool name tokens (split on "_") and the
 # first word of its description. Priority: destructive > write > read. Names matching no

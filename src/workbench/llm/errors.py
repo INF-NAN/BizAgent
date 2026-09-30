@@ -1,4 +1,4 @@
-"""LLM error taxonomy. Only network errors and HTTP 5xx are retried (Phase 4 spec)."""
+"""LLM error taxonomy. Only network errors and HTTP 5xx are retried; a 4xx would fail again."""
 
 from __future__ import annotations
 

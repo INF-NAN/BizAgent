@@ -262,7 +262,7 @@ def test_serving_profile_command() -> None:
     p = ServingProfile.load(Path("configs/serving/arctic-awm-4b.yaml"))
     cmd = vllm_command(p)
     assert cmd[:3] == ["vllm", "serve", "Snowflake/Arctic-AWM-4B"]
-    # ADR-020 (owner decision D11): the repo profile enables the hermes tool parser, no reasoning parser
+    # ADR-018: the repo profile enables the hermes tool parser, no reasoning parser
     assert cmd[-3:] == ["--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
     assert "--reasoning-parser" not in cmd and "--chat-template" not in cmd
     with pytest.raises(ValueError):
@@ -288,7 +288,7 @@ def test_serving_profile_command() -> None:
 
 
 def test_compose_vllm_matches_the_serving_profile() -> None:
-    """D16: docker-compose's vllm service must not drift from the serving profile (ADR-020)."""
+    """docker-compose's vllm service must not drift from the serving profile (ADR-018)."""
     from pathlib import Path
 
     import yaml

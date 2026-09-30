@@ -1,4 +1,4 @@
-"""The train env's processes get an allowlisted environment (ADR-026, owner decision D13b).
+"""The train env's processes get an allowlisted environment (ADR-024).
 
 Real subprocesses: `launch` runs a probe instead of the training command (there is no GPU here)
 and the probe reports the variable names it sees; the values planted as secrets must not reach it.
@@ -104,7 +104,7 @@ def launch_probe(
 def test_control_the_full_environment_reaches_the_training_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # what `launch` did before ADR-026: the training process inherited everything
+    # what `launch` did before ADR-024: the training process inherited everything
     seen = launch_probe(tmp_path, monkeypatch, {**os.environ, **ENVIRON})
     assert seen["planted"] == sorted(SECRETS)
 

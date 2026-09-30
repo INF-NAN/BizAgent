@@ -115,7 +115,7 @@ def create_env_app(settings: EnvSettings, manager: EnvManager | None = None) -> 
         mgr.touch(sid)
         return {"ok": sid}
 
-    # approval previews (ADR-029): a shadow env for one call, and before/after changes of a real call
+    # approval previews (ADR-026): a shadow env for one call, and before/after changes of a real call
     @app.post("/envs/{sid}/preview")
     async def preview(sid: str, req: PreviewRequest) -> dict[str, Any]:
         _get(sid)

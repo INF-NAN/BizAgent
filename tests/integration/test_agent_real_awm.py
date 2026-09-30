@@ -1,4 +1,4 @@
-"""Phase 5 acceptance: one complete agent flow on a real AWM env with the mock LLM."""
+"""One complete agent flow on a real AWM env with the mock LLM."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ async def test_agent_query_write_approve_on_real_env(tmp_path: Path) -> None:
             )
         ]
         assert first[-1]["type"] == "approval_required"
-        preview = first[-1]["preview"]  # ran in a shadow env on the real AWM server (ADR-029)
+        preview = first[-1]["preview"]  # ran in a shadow env on the real AWM server (ADR-026)
         assert preview["status"] == "ok" and preview["summary"] == "cart_items +1"
         assert (await rt.envs.diff(s.session_id))["changed"] is False  # the preview wrote nothing here
         searched = [e for e in first if e["type"] == "tool_call"]

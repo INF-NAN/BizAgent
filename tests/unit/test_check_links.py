@@ -12,11 +12,11 @@ README_OK = f"""\
 
 [![ci](https://example.com/badge.svg)](https://example.com/ci)
 <img src="docs/assets/shot.png" width="400" alt="shot">
-See [the guide](docs/guide.md "Guide"), [its section](docs/guide.md#11-未验证),
+See [the guide](docs/guide.md "Guide"), [its section](docs/guide.md#11-已知限制),
 [a repeat](docs/guide.md#notes-1), [a directory](docs/assets/), [root-relative](/docs/guide.md),
 [spaced](<docs/my notes.md>), [encoded](docs/my%20notes.md), [top](#demo),
 [an id](docs/guide.md#custom-anchor), [mail](mailto:someone@example.com),
-[an ADR](docs/guide.md#adr-028-任务书原文移入-docsprocess数字守卫按文件豁免).
+[an ADR](docs/guide.md#adr-027-可配置的审批策略configsapproval_policyyaml规则按顺序匹配).
 
 [ref]: docs/guide.md
 
@@ -32,7 +32,7 @@ See [the guide](docs/guide.md "Guide"), [its section](docs/guide.md#11-未验证
 GUIDE = """\
 # Guide
 
-## 1.1 未验证
+## 1.1 已知限制
 
 ## Notes
 
@@ -40,7 +40,7 @@ GUIDE = """\
 
 <a id="custom-anchor"></a>
 
-## ADR-028 任务书原文移入 `docs/process/`，数字守卫按文件豁免
+## ADR-027 可配置的审批策略（`configs/approval_policy.yaml`），规则按顺序匹配
 
 [back](../README.md#demo)
 """

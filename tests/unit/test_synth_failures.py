@@ -1,4 +1,4 @@
-"""Upstream errors during synthesis: the proxy records them, the runner judges the step (D19, ADR-024).
+"""Upstream errors during synthesis: the proxy records them, the runner judges the step (ADR-022).
 
 Zero cost. The proxy talks to httpx mock transports, or to the local fake upstream through a
 transport that scripts 402, 429, 5xx and network errors; the steps are real subprocesses that,
@@ -124,7 +124,7 @@ def test_step_requests_counts_requests_and_the_last_attempt_decides() -> None:
     assert (got.failed, got.failed_by_status) == (2, {"402": 1, "network": 1})
     refused = LedgerEntry("task", "m", 0, 0, cached=False, refused=True, key="d")
     assert step_requests([refused]) == StepRequests(refused=1)
-    # ledgers written before Phase 15 have no keys: every failed entry stands alone
+    # older ledgers have no keys: every failed entry stands alone
     assert step_requests([fail("", 429), fail("", 429)]).failed == 2
 
 

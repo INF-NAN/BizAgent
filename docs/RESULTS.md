@@ -7,7 +7,7 @@
 - 论文：arXiv 2602.10090 — Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning
 - 核对的论文版本：v3（2026-05-22）
 - 发表状态：Accepted to ICML 2026 (arXiv comments field of the abstract page)
-- 核对记录：`docs/verification/2026-09-24-paper-table4.md`
+- 核对方式：逐格对照 v3 Table 4 的 HTML 渲染与 PDF 第 7 页，两者的 Base 与 AWM 行完全一致；登记值即这些单元格。
 
 ## 表注
 

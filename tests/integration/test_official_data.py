@@ -2,8 +2,8 @@
 
 Skipped automatically when the dataset is absent (CI never downloads it). Nothing here
 modifies the official files: the env manager copies each scenario's database into a
-per-session run directory (rule R2). Counts asserted below are dataset facts recorded in
-docs/verification/2026-09-24-dataset.md, not model metrics.
+per-session run directory. Counts asserted below are facts of the dataset at revision dde80a0
+(docs/UPSTREAM.md §6.6), not model metrics.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ async def test_official_empty_search_normalizes_to_empty(official: EnvManager) -
 
 async def test_successful_write_with_empty_lists_is_not_empty(official: EnvManager) -> None:
     # official social_media_4: removing every hidden subreddit is a real write whose result has
-    # only an empty list; it must be "ok", not "empty" (ADR-014)
+    # only an empty list; it must be "ok", not "empty" (ADR-007)
     from workbench.gateway.policy import PolicyConfig, classify
 
     h = await official.start("social_media_4", session_id="off3")
@@ -151,7 +151,7 @@ async def test_successful_write_with_empty_lists_is_not_empty(official: EnvManag
 
 
 def test_http_method_floor_on_official_routes() -> None:
-    # ADR-015: noun "list" made this DELETE route a read before; the route method now sets the floor
+    # ADR-006: noun "list" made this DELETE route a read before; the route method now sets the floor
     from workbench.envs.catalog import iter_route_methods, load_route_methods
     from workbench.gateway.policy import METHOD_FLOOR, PolicyConfig, classify
 
@@ -178,7 +178,7 @@ def test_http_method_floor_on_official_routes() -> None:
 async def test_preview_of_an_official_write_matches_and_ignores_time_columns(
     official: EnvManager, tmp_path: Path
 ) -> None:
-    """ADR-029 on official e_commerce_33: the server stamps time columns with datetime.utcnow(), so a
+    """ADR-026 on official e_commerce_33: the server stamps time columns with datetime.utcnow(), so a
     preview and the real call differ there; the structural comparison records and skips them."""
     from workbench.config import ApprovalSettings, GatewaySettings
     from workbench.envs.service import LocalEnvService

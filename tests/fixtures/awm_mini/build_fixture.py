@@ -1,9 +1,10 @@
 """Build the hand-written mini AWM dataset used by offline tests and the mock demo.
 
 HAND-WRITTEN FIXTURE — NOT official AgentWorldModel-1K data. The tool interface of the served
-code was reconciled with the official `e_commerce_33` environment (see PROVENANCE below).
+code follows the official `e_commerce_33` environment (see PROVENANCE below and
+docs/examples/e-commerce-33-tools.md).
 
-Writes AWM-format JSONL files (field layout per docs/RECON.md §1.6) next to this script:
+Writes AWM-format JSONL files (field layout per docs/UPSTREAM.md §6.6) next to this script:
 gen_scenario / gen_tasks / gen_db / gen_sample / gen_envs / gen_verifier.pure_code.
 Run: `uv run python tests/fixtures/awm_mini/build_fixture.py`
 """
@@ -121,7 +122,7 @@ PROVENANCE = {
         "response field names; table names products, product_offers, carts, cart_items, payment_methods",
         "changes": "code written from scratch and simplified: fewer parameters, tables and columns; "
         "product_aggregates reduced to average_rating; sample rows, tasks and verifier are invented",
-        "evidence": "docs/verification/2026-09-24-fixture-reconciliation.md",
+        "reference": "docs/examples/e-commerce-33-tools.md",
     },
 }
 

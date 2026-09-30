@@ -35,7 +35,7 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
     gateway = Gateway(
         GatewaySettings(audit_path=audit),
         approvals=ApprovalService(secret=b"test"),
-        previews=LocalEnvService(manager),  # destructive approvals need a preview (ADR-029)
+        previews=LocalEnvService(manager),  # destructive approvals need a preview (ADR-026)
     )
     await gateway.register_session("gw1", env.scenario, env.url)
 
@@ -66,7 +66,7 @@ async def test_gateway_read_ok_destructive_denied_and_audited(manager: EnvManage
             assert body["status"] == "denied" and body["decision"] == "approval_required"
 
             # the official e_commerce_33 tools have no enum parameters; a type error is the
-            # validation failure they actually produce (docs/verification/2026-09-24-dataset.md)
+            # validation failure they actually produce (docs/examples/e-commerce-33-tools.md)
             bad = await s.call_tool("mini_e_commerce__get_product_by_id", {"product_id": "abc"})
             err = json.loads(bad.content[0].text)["error"]
             assert err["code"] == "invalid_arguments" and err["details"]["expected_type"] == "'integer'"

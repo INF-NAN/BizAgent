@@ -1,4 +1,4 @@
-"""The agent routes each call by the approval policy's answer (ADR-030, owner decision D32).
+"""The agent routes each call by the approval policy's answer (ADR-027).
 
 Mock LLM (the hand-written demo script) and a fake upstream; mechanisms only.
 """

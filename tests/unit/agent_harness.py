@@ -22,7 +22,7 @@ from workbench.obs.tracing import TraceHub
 FIX = Path("tests/fixtures/trajectories")
 SCENARIO = "mini_e_commerce"
 # (product id, title, offer id, price, average rating); response shapes follow the official
-# e_commerce_33 tools (docs/verification/2026-09-24-fixture-reconciliation.md)
+# e_commerce_33 tools (docs/examples/e-commerce-33-tools.md)
 PRODUCTS = [
     (1, "Wireless Noise Cancelling Headphones A", 11, 189.0, 4.7),
     (2, "Wireless Noise Cancelling Headphones B", 12, 249.0, 4.8),

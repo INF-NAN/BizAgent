@@ -1,4 +1,4 @@
-"""workbench.envs.changes: row-level changes and the structural preview comparison (ADR-029)."""
+"""workbench.envs.changes: row-level changes and the structural preview comparison (ADR-026)."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ def test_rows_columns_and_shape_of_an_insert_and_an_update(tmp_path: Path) -> No
     after = run(
         before,
         tmp_path / "after.db",
-        "INSERT INTO orders (status, total, created_at) VALUES ('open', 25.5, '2026-09-25 10:00:00')",
-        "UPDATE orders SET status = 'paid', updated_on = '2026-09-25 10:00:01' WHERE id = 1",
+        "INSERT INTO orders (status, total, created_at) VALUES ('open', 25.5, '2026-03-15 10:00:00')",
+        "UPDATE orders SET status = 'paid', updated_on = '2026-03-15 10:00:01' WHERE id = 1",
     )
     c = changes(before, after)
     orders = c["tables"]["orders"]
@@ -61,7 +61,7 @@ def test_rows_columns_and_shape_of_an_insert_and_an_update(tmp_path: Path) -> No
         "key": 1,
         "columns": ["status", "updated_on"],
         "before": {"status": "open", "updated_on": "2026-01-01 00:00:00"},
-        "after": {"status": "paid", "updated_on": "2026-09-25 10:00:01"},
+        "after": {"status": "paid", "updated_on": "2026-03-15 10:00:01"},
     }
     assert orders["shape"] == {"added": [2], "removed": [], "changed": [[1, ["status", "updated_on"]]]}
     assert orders["volatile"] == {
@@ -81,14 +81,14 @@ def test_only_timestamps_differ_between_two_runs_is_not_a_mismatch(tmp_path: Pat
     preview = run(
         before,
         tmp_path / "preview.db",
-        call.format(ts="2026-09-25 10:00:00"),
-        touch.format(ts="2026-09-25 10:00:00"),
+        call.format(ts="2026-03-15 10:00:00"),
+        touch.format(ts="2026-03-15 10:00:00"),
     )
     actual = run(
         before,
         tmp_path / "actual.db",
-        call.format(ts="2026-09-25 10:00:07"),
-        touch.format(ts="2026-09-25 10:00:07"),
+        call.format(ts="2026-03-15 10:00:07"),
+        touch.format(ts="2026-03-15 10:00:07"),
     )
     p, a = changes(before, preview), changes(before, actual)
     assert p != a  # the recorded rows differ (the timestamps) ...

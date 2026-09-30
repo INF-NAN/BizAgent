@@ -1,11 +1,11 @@
-"""`workbench serve probe`: how the vLLM service answers the two kinds of tool-calling request (U1).
+"""`workbench serve probe`: how the vLLM service answers the two kinds of tool-calling request.
 
 One request of each kind to the served model (a local service, no paid API). Each is a check of the
 serving chain, run once; nothing here is an evaluation.
 
 - ``native``: the request the workbench agent sends when it acts, built and sent by the ``vllm``
   backend itself (native ``tools``, streaming, thinking on). Behind ``--enable-auto-tool-choice
-  --tool-call-parser hermes`` (ADR-020) the answer should carry native ``tool_calls``. Without
+  --tool-call-parser hermes`` (ADR-018) the answer should carry native ``tool_calls``. Without
   them the backend falls back to reading ``<tool_call>`` text from ``content``
   (``llm/toolcall_parse.py``); the probe reports that as ``text-fallback``.
 - ``text``: the first request `awm agent` sends to a local vLLM, made by AWM's own

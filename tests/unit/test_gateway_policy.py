@@ -144,7 +144,7 @@ def test_invalid_token_denied() -> None:
 @pytest.mark.parametrize(
     ("tool", "method", "level", "source"),
     [
-        # read verbs in write routes are raised to the method floor (ADR-015)
+        # read verbs in write routes are raised to the method floor (ADR-006)
         ("purge_my_list_by_maturity_level", "DELETE", "destructive", "http_method"),
         ("attach_contact_list_to_collector", "POST", "write", "http_method"),
         ("record_answer_view", "POST", "write", "http_method"),

@@ -51,7 +51,7 @@ class Runtime:
         self.hub = TraceHub(settings.env.runs_dir)
         self.gateway = gateway or Gateway(settings.gateway, on_call=on_call, approval=settings.approval)
         if self.gateway.previews is None:
-            self.gateway.attach_previews(env_service)  # approval previews run in the env-manager (ADR-029)
+            self.gateway.attach_previews(env_service)  # approval previews run in the env-manager (ADR-026)
         self.llm = llm or build_llm_client(settings.llm)
         self.memory = MemoryService(settings.agent.memory_db, settings.agent.memory_ttl_s)
         self.sessions: dict[str, SessionInfo] = {}

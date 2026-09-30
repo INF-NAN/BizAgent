@@ -1,4 +1,8 @@
-"""Training profiles. Only the `smoke` profile exists and it is validated against rule R2."""
+"""Training profiles: only `smoke` exists, and it is validated against the smoke limits.
+
+The limits are <= 1.7B parameters, LoRA, <= 5 training steps and the NO_RESULTS marker; this
+repository runs no full RL training and produces no model-quality numbers.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ MAX_STEPS = 5
 
 
 class ProfileError(ValueError):
-    """The profile violates rule R2 or is malformed."""
+    """The profile violates the smoke limits or is malformed."""
 
 
 @dataclass(frozen=True)
@@ -47,7 +51,7 @@ class TrainProfile:
     def validate(self) -> None:
         errors = []
         if self.profile != "smoke":
-            errors.append("only the 'smoke' profile may be launched (no full RL training, rule R2)")
+            errors.append("only the 'smoke' profile may be launched (no full RL training)")
         if self.model_size_b > MAX_MODEL_B:
             errors.append(f"model_size_b {self.model_size_b} > {MAX_MODEL_B}")
         if int(self.overrides.get("actor_rollout_ref.model.lora_rank", 0)) <= 0:

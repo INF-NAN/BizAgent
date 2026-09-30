@@ -1,4 +1,4 @@
-"""The approval policy on its own (ADR-030): rule order, argument conditions, the destructive guard,
+"""The approval policy on its own (ADR-027): rule order, argument conditions, the destructive guard,
 defaults without a match, and schema validation. The gateway side is in test_gateway_approval_policy.py.
 """
 
@@ -14,7 +14,7 @@ import yaml
 from workbench.gateway.approval_policy import ApprovalPolicy, ApprovalPolicyError, Verdict
 
 DEFAULT = Path("configs/approval_policy.yaml")  # configs/app.yaml: approval.policy_file
-DEMO = Path("configs/approval_policy.demo.yaml")  # make demo-mock, docker smoke (owner decision D34)
+DEMO = Path("configs/approval_policy.demo.yaml")  # make demo-mock, docker smoke
 
 
 def policy(*rules: dict[str, Any]) -> ApprovalPolicy:
@@ -100,8 +100,8 @@ def test_destructive_calls_are_never_auto_approved() -> None:
     everything = {"id": "everything", "decision": "auto_approve"}  # no risk filter: matches destructive too
     v = decide(policy(everything), "remove_cart_item", "destructive", cart_item_id=1)
     assert (v.decision, v.rule, v.needs_token) == ("require_human", None, True)
-    assert v.guard == "rule everything skipped: destructive calls are never auto-approved (ADR-030)"
-    assert v.checks[0].matched is False and v.checks[0].reason.endswith("never auto-approved (ADR-030)")
+    assert v.guard == "rule everything skipped: destructive calls are never auto-approved (ADR-027)"
+    assert v.checks[0].matched is False and v.checks[0].reason.endswith("never auto-approved (ADR-027)")
     # the skipped rule does not hide a later, stricter one
     later = decide(
         policy(everything, {"id": "no", "tools": "remove_*", "decision": "deny"}),
@@ -204,7 +204,7 @@ def test_schema_errors(tmp_path: Path, text: str, problem: str) -> None:
 
 
 def test_the_default_policy_auto_approves_nothing() -> None:
-    """The shipped default is the most conservative policy (owner decision D34): every write goes to a
+    """The shipped default is the most conservative policy: every write goes to a
     person. The auto_approve rule is a commented-out example that an administrator must switch on."""
     p = ApprovalPolicy.load(DEFAULT)
     assert [(r.id, r.decision) for r in p.rules] == [

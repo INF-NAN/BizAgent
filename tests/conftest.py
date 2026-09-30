@@ -1,4 +1,4 @@
-"""Shared pytest setup. All tests run on CPU with the mock LLM backend (rule R10)."""
+"""Shared pytest setup. All tests run on CPU with the mock LLM backend."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 os.chdir(ROOT)
-# Keep bytecode out of the upstream submodules so their worktrees stay clean (rule R5).
+# Keep bytecode out of the upstream submodules so their worktrees stay clean.
 os.environ.setdefault("PYTHONPYCACHEPREFIX", str(ROOT / ".cache" / "pycache"))
 
 MINI_DATASET = ROOT / "tests" / "fixtures" / "awm_mini"
@@ -33,7 +33,7 @@ def official_data_present() -> bool:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    # CI never downloads the official dataset: official_data tests skip there (TASK_v2 Phase 11).
+    # CI never downloads the official dataset: official_data tests skip there.
     if official_data_present():
         return
     skip = pytest.mark.skip(reason="official dataset not found in data/awm1k (run `make data`)")

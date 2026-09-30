@@ -1,4 +1,4 @@
-"""MCP client for the per-session AWM servers (MCP SDK 1.26.0, see docs/RECON.md §10)."""
+"""MCP client for the per-session AWM servers (MCP SDK 1.26.0, see docs/UPSTREAM.md §10.2)."""
 
 from __future__ import annotations
 

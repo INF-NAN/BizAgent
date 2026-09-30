@@ -184,7 +184,7 @@ def scenario_file(tmp_path: Path, *rows: dict[str, str]) -> Path:
 
 
 def test_scenario_file_starts_at_gen_task(tmp_path: Path) -> None:
-    """ADR-021: no embedding endpoint -> a hand-written local_ scenario, `gen scenario` skipped."""
+    """ADR-019: no embedding endpoint -> a hand-written local_ scenario, `gen scenario` skipped."""
     run_dir = tmp_path / "synth" / "r3"
     src = scenario_file(tmp_path)
     fake = FakeAwm()

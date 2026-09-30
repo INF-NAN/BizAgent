@@ -58,7 +58,7 @@ def make_act(deps: AgentDeps) -> Node:
             }
         )
         risk = next((t["risk"] for t in state["tools"] if t["name"] == tc.name), "unknown")
-        # The approval policy decides per call (ADR-030): only require_human waits for a person;
+        # The approval policy decides per call (ADR-027): only require_human waits for a person;
         # auto_approve, deny and plain reads go straight to the gateway, which enforces the same answer.
         verdict = deps.gateway.approval_verdict(sid, tc.name, tc.arguments) if "__" in tc.name else None
         policy = verdict.as_dict() if verdict is not None else None

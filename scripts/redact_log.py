@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Redact a Phase 15 paste-back file before it leaves the GPU machine (TASK_v2 N1).
+"""Redact secrets and personal data from a log before sharing it.
 
-    uv run python scripts/redact_paste.py data/p15/paste-15a.txt   # writes data/p15/paste-15a.redacted.txt
+    uv run python scripts/redact_log.py logs/serve.log   # writes logs/serve.redacted.log
 
 Replaces keys, tokens, credentials in URLs, emails and card and phone numbers with markers, and
 prints how many of each it replaced; the input file stays as it is. Emails, cards and phones start
-from the gateway's audit rules (workbench.gateway.audit, ADR-016). Logs are full of numbers that
+from the gateway's audit rules (workbench.gateway.audit, ADR-014). Logs are full of numbers that
 only look like phones, so a phone here must be written the way the dataset writes one (see
 _phone), and the rule never crosses a line break. Patterns cannot know every secret: read the
-output before pasting it.
+output before sharing it.
 """
 
 from __future__ import annotations

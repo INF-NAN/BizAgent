@@ -1,4 +1,4 @@
-"""Environment of subprocesses that run generated code: an allowlist, deny by default (ADR-019).
+"""Environment of subprocesses that run generated code: an allowlist, deny by default (ADR-017).
 
 The AWM env servers execute each scenario's LLM-generated ``full_code``
 (awm/core/server.py:163); `awm env check_all` starts those servers as well and they inherit its
@@ -11,7 +11,7 @@ The `awm gen` steps call the LLM and `gen env` / `gen verifier` also run the cod
 (awm/core/env.py:161-172, awm/core/verifier.py:104), so a gen step gets the base variables plus
 the LLM settings only (``LLM_VARS``, ``NETWORK_VARS``; see ``SynthRunner.step_env``).
 
-Training (`workbench train preflight` and `launch`, ADR-026) gets ``train_env()``: the base
+Training (`workbench train preflight` and `launch`, ADR-024) gets ``train_env()``: the base
 variables, the network settings and what the ML stack reads, never a credential-like name.
 """
 
@@ -26,7 +26,7 @@ PYCACHE_DIR = Path(".cache/pycache")
 
 # Needed to run a Python child: PATH (AWM pipes the server through `sh` and `tee`,
 # awm/core/server.py:163), locale, time zone, temp dir and interpreter I/O settings.
-# PYTHONPYCACHEPREFIX keeps __pycache__ out of the submodules (CLAUDE.md).
+# PYTHONPYCACHEPREFIX keeps __pycache__ out of the pinned submodules, which must stay clean.
 BASE_VARS: tuple[str, ...] = (
     "PATH",
     "LANG",
@@ -70,7 +70,7 @@ NETWORK_VARS: tuple[str, ...] = (
 )
 
 
-# Training (ADR-026). The train env runs third-party ML code, and the smoke run feeds model output
+# Training (ADR-024). The train env runs third-party ML code, and the smoke run feeds model output
 # to AgentFly's calculator tool, whose sympify uses eval (sympy/core/sympify.py:138-139). Named
 # variables it may need: caches under the home directory (uv, Hugging Face, torch, Triton), the
 # CUDA driver libraries (LD_LIBRARY_PATH, set by NVIDIA container images), a C compiler for
@@ -137,10 +137,10 @@ def generated_code_env(environ: Mapping[str, str] | None = None) -> dict[str, st
 
 
 def train_env(environ: Mapping[str, str] | None = None, passthrough: Iterable[str] = ()) -> dict[str, str]:
-    """Environment for the train env's processes (ADR-026).
+    """Environment for the train env's processes (ADR-024).
 
     ``BASE_VARS``, ``NETWORK_VARS`` (model downloads), ``TRAIN_VARS`` and every name under
-    ``TRAIN_PREFIXES`` that does not look like a credential. ``passthrough`` (the owner's
+    ``TRAIN_PREFIXES`` that does not look like a credential. ``passthrough`` (the operator's
     ``train.env_passthrough``) adds names on purpose, credential-like ones included.
     """
     source = os.environ if environ is None else environ

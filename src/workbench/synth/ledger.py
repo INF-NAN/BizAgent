@@ -20,15 +20,15 @@ class LedgerEntry:
     completion_tokens: int
     cached: bool
     endpoint: str = "chat"
-    # True when the proxy refused to forward the request (budget stop, ADR-023): nothing was billed.
+    # True when the proxy refused to forward the request (budget stop, ADR-021): nothing was billed.
     refused: bool = False
-    # True when the request ended in an upstream error after the proxy's retries (ADR-024): an HTTP
+    # True when the request ended in an upstream error after the proxy's retries (ADR-022): an HTTP
     # error status, or a network error when ``upstream_status`` is None.
     failed: bool = False
     upstream_status: int | None = None
     error: str = ""
     # cache key of the request body; AWM retries a request with the same body, so this ties the
-    # attempts of one request together (ADR-024). Empty in ledgers written before Phase 15.
+    # attempts of one request together (ADR-022). Empty in older ledgers; such entries stand alone.
     key: str = ""
 
 
@@ -68,7 +68,7 @@ class Ledger:
         ]
 
     def spent(self, prices: dict[str, Price]) -> tuple[float, list[str]]:
-        """Cost of the billed entries so far, and the models that have no price (ADR-023)."""
+        """Cost of the billed entries so far, and the models that have no price (ADR-021)."""
         total = 0.0
         unpriced: set[str] = set()
         for e in self.entries():
@@ -134,13 +134,13 @@ class Ledger:
 
 @dataclass(frozen=True)
 class StepRequests:
-    """How the LLM requests of one step ended (ADR-024).
+    """How the LLM requests of one step ended (ADR-022).
 
     A request is identified by its cache key, so AWM's retries of it count once and the last
     attempt decides: a request that failed and then succeeded is not lost.
     """
 
-    refused: int = 0  # ended refused by the budget stop (ADR-023)
+    refused: int = 0  # ended refused by the budget stop (ADR-021)
     failed: int = 0  # ended in an upstream error after every retry
     failed_by_status: dict[str, int] = field(default_factory=dict)  # "402", "503", "network", ...
 

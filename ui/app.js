@@ -59,7 +59,7 @@ function timeline(e) {
     li.append(e.tool, " ", badge(e.status, e.status), " ", badge(e.decision === "allowed" ? "allowed" : "denied", e.decision));
     if (e.policy && e.policy.rule) li.append(" ", ruleBadge(e.policy));
     if (e.approver) li.append(isPolicyApprover(e.approver) ? " auto-approved by the approval policy" : ` approved by ${e.approver}`);
-    // an auto-approved call has no preview by design (D32): a neutral badge, not the red 未预演 one
+    // an auto-approved call has no preview by design (nobody reads one): a neutral badge, not the red 未预演 one
     if (e.preview_check) li.append(" ", isPolicyApprover(e.approver) ? badge("empty", "no preview") : checkBadge(e.preview_check));
     if (e.preview_check && e.preview_check.actual) li.append(el("span", { class: "muted" }, ` changed: ${e.preview_check.actual}`));
     if (e.policy && e.policy.guard) li.append(" ", badge("mismatch", "guard"), ` ${e.policy.guard}`);
@@ -106,7 +106,7 @@ function handleEvent(e) {
   }
 }
 
-// ---------------------------------------------------------------- approval policy (ADR-030)
+// ---------------------------------------------------------------- approval policy (ADR-027)
 function isPolicyApprover(approver) {
   return typeof approver === "string" && approver.startsWith("policy:");
 }
@@ -124,7 +124,7 @@ function policySection(p) {
   return out;
 }
 
-// ---------------------------------------------------------------- approval card + preview (ADR-029)
+// ---------------------------------------------------------------- approval card + preview (ADR-026)
 function checkBadge(check) {
   const cls = { match: "match", preview_mismatch: "mismatch", preview_unavailable: "unpreviewed" }[check.result] || "empty";
   return badge(cls, `preview ${check.result}`);

@@ -1,7 +1,7 @@
 """Prometheus operational metrics for the API.
 
 These are OPERATIONS metrics (latency, call counts, errors, approval wait, active envs) —
-not model-quality metrics, and must never be presented as such (rule R3).
+not model-quality metrics, and must never be presented as such: the app layer is not evaluated.
 """
 
 from __future__ import annotations

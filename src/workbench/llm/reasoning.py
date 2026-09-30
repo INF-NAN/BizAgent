@@ -1,6 +1,6 @@
-"""Pass ``reasoning_content`` back on later requests that carry ``tools`` (ADR-017).
+"""Pass ``reasoning_content`` back on later requests that carry ``tools`` (ADR-015).
 
-DeepSeek thinking mode (https://api-docs.deepseek.com/guides/thinking_mode, read 2026-09-24):
+DeepSeek thinking mode (https://api-docs.deepseek.com/guides/thinking_mode):
 
 - the chain of thought is returned as ``reasoning_content`` next to ``content``
   (streaming: ``delta.reasoning_content``);
@@ -47,7 +47,7 @@ def _digest(parts: list[list[Any]]) -> str:
 
 
 class ReasoningStore:
-    """Bounded LRU map: assistant turn identity -> the reasoning_content it was generated with."""
+    """Bounded LRU map: assistant turn identity -> the reasoning_content that came with it."""
 
     def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
         self._max = max_entries

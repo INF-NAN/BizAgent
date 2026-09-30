@@ -1,5 +1,6 @@
-# Separate uv environment for training (rule R11). Never import any of this from the app env.
-# Phase 1 only locks it; installing requires a Linux x86_64 + CUDA machine (UNVERIFIED-LOCAL).
+# Separate uv environment for training (ADR-002): AgentFly's veRL fork pins numpy<2 while AWM needs
+# numpy>=2.4.2. Never import any of this from the app env. `make setup` only checks the lock;
+# installing it (`cd train && uv sync`) needs a Linux x86_64 + CUDA machine (docs/DEPLOYMENT.md).
 [project]
 name = "bizagent-workbench-train"
 version = "0.1.0"
@@ -21,6 +22,6 @@ agentfly = { path = "../third_party/AgentFly", editable = true }
 
 [tool.uv.extra-build-dependencies]
 # flash-attn (sdist only) compiles against the torch in its build environment. A plain "torch"
-# there is resolved on its own, to the newest release (uv 0.8.17, docs/RECON.md "Phase 15 前置修复"),
-# not the locked 2.10.0 the extension is loaded into; match-runtime pins it to the lock (ADR-027).
+# there is resolved on its own, to the newest release (uv 0.8.17; docs/UPSTREAM.md §8),
+# not the locked 2.10.0 the extension is loaded into; match-runtime pins it to the lock (ADR-025).
 flash-attn = [{ requirement = "torch", match-runtime = true }]

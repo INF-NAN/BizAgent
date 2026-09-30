@@ -2,27 +2,28 @@
 
 Order and arguments mirror AWM's own pipeline (third_party/agent-world-model/awm/core/
 pipeline.py:39-143); every step runs as ``python -m awm.cli gen <step> ...`` in a subprocess
-(CLI verified in docs/RECON.md §1.1). Experimental settings are untouched: we only choose
+(commands registered in awm/cli.py:49-110). Experimental settings are untouched: we only choose
 paths, the scenario count (``--target_count``, and ``--limit`` for the task step) and the
 verifier mode. Rules enforced here:
 
 - DRY-RUN by default; ``--execute`` additionally requires the LLM env vars.
 - The seed file is COPIED into the run dir first: `gen scenario` writes classification
   results back into its input (awm/core/scenario.py:642), which would otherwise modify the
-  submodule (rule R5).
-- Output must live under ``data/synth/`` and the manifest says ``origin: local-synth`` (R2).
+  submodule, which stays pristine.
+- Output must live under ``data/synth/`` and the manifest says ``origin: local-synth`` so
+  synthesized environments never mix with the official dataset (ADR-011).
 - Each step runs in its own process group. SIGINT/SIGTERM stop that group and the groups of
   everything the step started (AWM starts test servers in their own sessions, awm/core/env.py:
-  161-172), mark the step ``interrupted`` and exit; the same command resumes (ADR-022). A step
+  161-172), mark the step ``interrupted`` and exit; the same command resumes (ADR-020). A step
   that did not finish starts again without its outputs: they are moved to ``attempts/`` first.
 - Budget stop: before a step and after it, the run's ledger cost is checked against
-  ``synth.budget``; the proxy refuses to forward once it is reached (ADR-023).
+  ``synth.budget``; the proxy refuses to forward once it is reached (ADR-021).
 - A step is judged from the ledger as well as from its exit code, because AWM turns failed LLM
   requests into empty replies and exits 0 (awm/gpt.py:195-206): a refused request fails the step;
   more requests lost to upstream errors than ``synth.max_failed_requests`` fail it; fewer mark it
-  ``done_with_failures``, never ``done`` (ADR-024).
+  ``done_with_failures``, never ``done`` (ADR-022).
 - ``--scenario-file`` starts at `gen task` with a hand-written scenario file instead of running
-  `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-021). `gen task`
+  `gen scenario`, which needs an embedding endpoint (awm/core/scenario.py:63; ADR-019). `gen task`
   reads only each line's ``name`` and ``description`` (awm/core/task.py:44-45, 126).
 """
 
@@ -56,7 +57,7 @@ REQUIRED_ENV = ("OPENAI_API_KEY", "AWM_SYN_OVERRIDE_MODEL", "EMBEDDING_OPENAI_AP
 # Hand-written scenarios: AWM's normalized form (awm/tools.py:335-339) with a local_ prefix and
 # no `_<number>` suffix. All 1000 official names are `<category>_<number>`, and two of them start
 # with local_ as well (local_search_1, local_services_marketplace_1), so the prefix alone would not
-# keep them apart (ADR-011, ADR-021).
+# keep them apart (ADR-011, ADR-019).
 LOCAL_SCENARIO_NAME = re.compile(r"local_[a-z0-9_]+")
 OFFICIAL_SUFFIX = re.compile(r"_\d+$")
 CommandRunner = Callable[[list[str], dict[str, str], Path], int]
@@ -67,15 +68,15 @@ class SynthError(RuntimeError):
 
 
 class SynthInterrupted(SynthError):
-    """SIGINT/SIGTERM during a step or the validation; the same command resumes (ADR-022)."""
+    """SIGINT/SIGTERM during a step or the validation; the same command resumes (ADR-020)."""
 
 
 class SynthBudgetExceeded(SynthError):
-    """The run's ledger cost reached ``synth.budget`` (ADR-023)."""
+    """The run's ledger cost reached ``synth.budget`` (ADR-021)."""
 
 
 class SynthUpstreamErrors(SynthError):
-    """More requests of a step ended in upstream errors than ``synth.max_failed_requests`` (ADR-024)."""
+    """More requests of a step ended in upstream errors than ``synth.max_failed_requests`` (ADR-022)."""
 
 
 @dataclass(frozen=True)
@@ -267,8 +268,8 @@ def plan_steps(
 def judge_step(outputs_ok: bool, requests: StepRequests, max_failed: int) -> tuple[str, str | None]:
     """A step's status and failure reason from its exit, its outputs and its ledger entries.
 
-    Refused requests (budget stop, ADR-023) always fail the step. Requests lost to upstream errors
-    fail it above ``max_failed``; up to it, the step is ``done_with_failures`` (ADR-024).
+    Refused requests (budget stop, ADR-021) always fail the step. Requests lost to upstream errors
+    fail it above ``max_failed``; up to it, the step is ``done_with_failures`` (ADR-022).
     """
     if requests.refused:
         return "failed", "budget"
@@ -293,7 +294,7 @@ def _pgid(pid: int) -> int | None:
 
 
 def stop_process_tree(root: int, grace_s: float = 5.0) -> list[int]:
-    """Stop ``root``'s process group and the process groups of all its descendants (ADR-022).
+    """Stop ``root``'s process group and the process groups of all its descendants (ADR-020).
 
     AWM starts the servers it tests in their own sessions (awm/core/env.py:161-172), so they are
     not in the step's group; they are found through the process tree while ``root`` still runs.
@@ -466,7 +467,7 @@ class SynthRunner:
         (self.run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def step_env(self, step: str, proxy_base: str | None) -> dict[str, str]:
-        """Environment of one `awm gen` step: the allowlist plus the LLM settings (ADR-019).
+        """Environment of one `awm gen` step: the allowlist plus the LLM settings (ADR-017).
 
         `gen env` and `gen verifier` also run the code they generate (awm/core/env.py:161-172,
         awm/core/verifier.py:104). Through the proxy a step gets a placeholder key and the
@@ -628,7 +629,7 @@ class SynthRunner:
         return result
 
     def _finished(self, entry: dict[str, Any]) -> bool:
-        """Whether a recorded step counts as finished under the current settings (ADR-024).
+        """Whether a recorded step counts as finished under the current settings (ADR-022).
 
         ``done_with_failures`` counts only while its lost requests stay within
         ``synth.max_failed_requests``; lower the limit and the same command redoes the step.
