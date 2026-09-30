@@ -1,6 +1,6 @@
 # ARCHITECTURE — 分层结构与关键时序
 
-本仓库只做应用层与工程层：把上游 AWM 的环境、上游 AgentFly 的训练框架，组织成一个"可部署、可审计、可演示"的企业 MCP 智能体工作台。模型本身和评测都不在范围内（ADR-013）。
+本仓库是应用层与工程层：把上游 AWM 的环境与 AgentFly 的训练框架组织成一个可部署、可审计、可演示的企业 MCP 智能体工作台。模型本身和模型评测不在范围内（ADR-013）。
 
 ## 1. 分层图
 
@@ -16,7 +16,7 @@ flowchart TB
   subgraph SERVE["服务层"]
     LLM["llm/client.py<br/>两层超时 · 重试 · &lt;tool_call&gt; 解析"]
     MOCK["mock_replay<br/>手写脚本（CPU）"]
-    VLLM["vLLM / OpenAI 兼容端点<br/>（GPU：UNVERIFIED-LOCAL）"]
+    VLLM["vLLM / OpenAI 兼容端点"]
   end
   subgraph GW["网关层"]
     GATE["gateway/core.py + server.py<br/>MCP server：路由 · deny-first 策略 · 审批策略（approval_policy.yaml） · 预演记录 · 一次性审批令牌 · 执行后比对 · 限流 · 审计 · 空/错归一"]
@@ -25,12 +25,12 @@ flowchart TB
     MGR["envs/manager.py + service.py<br/>env-manager：每会话独立 DB · 进程组 · 环境变量白名单 · 快照/diff · 审批前预演 · 回收"]
     AWMSRV["AWM MCP server 子进程<br/>third_party/agent-world-model（只读）"]
     DB[("会话 SQLite<br/>initial.db / work.db")]
-    SHADOW["影子 AWM server（ADR-029）<br/>会话 DB 的在线备份副本 · 隔离端口 · 用完即回收"]
+    SHADOW["影子 AWM server（ADR-026）<br/>会话 DB 的在线备份副本 · 隔离端口 · 用完即回收"]
   end
   subgraph OFF["合成与训练（离线）"]
     SYN["synth/<br/>编排 awm gen 各步 · checkpoint · LLM 代理（缓存/重试/账本） · 校验"]
     TRAIN["train/<br/>preflight · smoke launch（子进程进入独立 train 环境）"]
-    AF["third_party/AgentFly + veRL fork<br/>（GPU：UNVERIFIED-LOCAL）"]
+    AF["third_party/AgentFly + veRL fork<br/>（GPU）"]
   end
 
   UI -->|HTTP / SSE| API --> AGENT
@@ -54,7 +54,7 @@ flowchart TB
 
 - 外部 MCP 客户端也可以直接连接网关（API 内挂载在 `/gateway/mcp`，或 `workbench gateway serve` 独立运行），享有同样的策略与审计（ADR-005）。
 - env-manager 可以与 API 同进程（`LocalEnvService`），也可以作为独立服务（`workbench env serve` + `RemoteEnvService`），docker compose 使用后者。
-- app 环境与 train 环境是两个独立的 uv 环境；app 代码不 import 任何训练依赖（ADR-002，R11）。
+- app 环境与 train 环境是两个独立的 uv 环境；app 代码不 import 任何训练依赖（ADR-002）。
 
 ## 2. 一次带审批的写操作
 
@@ -84,9 +84,9 @@ sequenceDiagram
   GW-->>G: status=ok（审计一条）
   G->>L: act
   L-->>G: tool_call add_item_to_cart
-  G->>GW: approval_verdict（审批策略：规则按顺序匹配，ADR-030）
+  G->>GW: approval_verdict（审批策略：规则按顺序匹配，ADR-027）
   GW-->>G: require_human（没有命中规则：write 默认需要人工审批）
-  G->>GW: preview（preview 节点，ADR-029）
+  G->>GW: preview（preview 节点，ADR-026）
   GW->>M: preview(sid, add_item_to_cart, 参数, 超时)
   M->>M: 在线备份会话当前的 work.db → 影子副本
   M->>S: 启动（独立进程组、租用端口）
@@ -121,8 +121,8 @@ sequenceDiagram
 要点：
 
 - 被中断的 `approve` 节点在恢复时会重新执行，所以令牌在恢复后才签发（`agent/nodes/approve.py`）；预演也因此放在单独的 `preview` 节点，结果存进 checkpoint，只执行一次。
-- 审批策略（ADR-030）：act 先问网关这次调用的决策，只有 require_human 走上图的预演与审批；auto_approve 由网关以 `policy:<规则编号>` 自己签发令牌（不预演，执行后照常测量改动，D32）；deny 由网关直接拒绝。网关在每次调用时按同一策略执行，外部 MCP 客户端也不例外。默认策略 `configs/approval_policy.yaml` 不含 auto_approve 规则，演示与测试用 `configs/approval_policy.demo.yaml`（D34）。
-- 预演（ADR-029）：影子环境从会话**当前**数据库的副本启动，绝不写会话自己的数据库；有超时；结束后进程组、端口与目录全部回收。
+- 审批策略（ADR-027）：act 先问网关这次调用的决策，只有 require_human 走上图的预演与审批；auto_approve 由网关以 `policy:<规则编号>` 自己签发令牌（不预演，执行后照常测量改动）；deny 由网关直接拒绝。网关在每次调用时按同一策略执行，外部 MCP 客户端也不例外。默认策略 `configs/approval_policy.yaml` 不含 auto_approve 规则，演示与测试用 `configs/approval_policy.demo.yaml`。
+- 预演（ADR-026）：影子环境从会话当前数据库的副本启动，不写会话自己的数据库；有超时；结束后进程组、端口与目录全部回收。
 - 令牌与参数摘要、预演 digest 绑定：模型在审批后改动参数，网关会拒绝调用；预演未成功而该风险级别要求预演（`approval.require_preview`，默认 destructive）时不签发令牌，只能拒绝；不要求时令牌绑定 `preview_unavailable`，UI 标出"未预演"。
 - 真实执行后按结构比对实际改动与预演（表、主键、改动的列名；时间列只记录不比对），结果写入审计；不一致时记 `preview_mismatch`，UI 标出。
 - 拒绝时，智能体收到 `{"status": "rejected"}` 的工具消息并回到 `plan` 重新规划。
@@ -149,3 +149,13 @@ stateDiagram-v2
 ```
 
 守卫（`agent/guards.py`）：最大步数、重复调用、连续无变化、token 预算、墙钟时间。任一触发都进入 `respond`（`agent/nodes/common.py`），并在 trace 中记录 `terminated` 原因。长期记忆只在 `verify` 节点写入，且只接受 `user_stated` 与 `tool_result` 两种来源（ADR-010）。
+
+## 4. Prompt 版本
+
+prompt 放在 `src/workbench/agent/prompts/*.md`，文件第一行是 `<!-- prompt: <name> | version: <n> -->`，trace 的 `llm` 事件记录 plan 所用的版本。修改 prompt 时提升版本号，并在下表记录。
+
+| Prompt | 版本 | 内容 |
+|---|---|---|
+| plan | 1 | 只允许使用运行时注入的工具；标记会改数据的步骤；输出 1–10 步的 JSON |
+| act | 2 | 每轮最多调用一个工具；被拒绝后不重试；`empty` 不算错误；根据 `error` 里的 hints 修正参数。工具的描述与参数 schema 只经请求的原生 `tools` 参数传入，system prompt 只列工具名与风险级别（ADR-016） |
+| verify | 1 | 输出 `complete` / `missing`，以及带来源标记的 `memories` |
