@@ -1,0 +1,72 @@
+# BizAgent Workbench application config. Every value can be overridden by
+# environment variables, e.g. WORKBENCH_LLM__BACKEND=vllm or WORKBENCH_ENV__MAX_ENVS=8.
+env:
+  dataset_dir: data/awm1k        # official AgentWorldModel-1K (downloaded by `make data`)
+  runs_dir: data/runs            # per-session isolated copies (DBs, logs, snapshots)
+  host: 127.0.0.1
+  port_min: 18100
+  port_max: 18199
+  max_envs: 4
+  queue_timeout_s: 60
+  start_timeout_s: 60
+  health_timeout_s: 10
+  idle_timeout_s: 600
+  max_previews: 2                # shadow environments for approval previews running at once (ADR-026)
+gateway:
+  policy_file: configs/tool_policy.yaml
+  audit_path: data/audit/gateway.jsonl
+  upstream_timeout_s: 30
+  port: 8081
+approval:
+  # Before a write/destructive call is approved, it runs once in a shadow environment started from a
+  # copy of the session's current DB; the approval card shows the rows it will change (ADR-026).
+  # require_preview true: a failed preview leaves only a rejection. false: approvable, the token is
+  # bound to "preview_unavailable" and the UI shows 未预演.
+  require_preview: {write: false, destructive: true}
+  preview_timeout_s: 30          # 5x the slowest measured total on official e_commerce_33, rounded up
+  preview_max_rows: 20           # rows per table shown on the card; the comparison uses every key
+  # Ordered rules deciding auto_approve / require_human / deny per call; checked when the gateway
+  # starts (ADR-027). Without a matching rule, write and destructive calls need a person. The default
+  # file auto-approves nothing; `workbench api serve --demo` (make demo-mock)
+  # uses configs/approval_policy.demo.yaml, which has one rule of each decision.
+  policy_file: configs/approval_policy.yaml
+llm:
+  backend: mock_replay           # mock_replay | vllm | openai_compat
+  model: Snowflake/Arctic-AWM-4B
+  base_url: http://127.0.0.1:8000/v1
+  api_key_env: OPENAI_API_KEY  # pragma: allowlist secret
+  connect_timeout_s: 5
+  read_timeout_s: 60
+  total_timeout_s: 180
+  max_retries: 3
+  max_tokens: 8192               # includes thinking tokens on DeepSeek (ADR-016)
+agent:
+  max_steps: 12
+  repeat_call_threshold: 3
+  no_change_threshold: 4
+  token_budget: 240000         # a full max_steps run on a 39-tool official scenario fits (ADR-016)
+  wall_clock_s: 300
+api:
+  host: 127.0.0.1
+  port: 8080
+  max_sessions: 4
+
+synth:
+  # Budget stop for `workbench synth run --execute` (ADR-021): once the run's ledger cost, priced
+  # with configs/pricing.yaml (CNY), reaches this value the local proxy refuses to forward and the
+  # current step fails; raise it (e.g. WORKBENCH_SYNTH__BUDGET=8) and rerun the same command to
+  # resume. null disables the stop.
+  budget: 5.0
+  # A gen step whose LLM requests end in an upstream error after every retry (HTTP 4xx/5xx or a
+  # network error; AWM then writes empty results and exits 0) is judged from the ledger (ADR-022):
+  # more such requests than this fail the step, and the same command resumes it; 1..this many mark
+  # it done_with_failures (listed in the output and in validation.json), never done.
+  max_failed_requests: 0
+
+train:
+  # `workbench train preflight` and `launch` give the train env an allowlisted environment
+  # (ADR-024): the base variables, proxies, and what CUDA/NCCL/PyTorch/vLLM/Ray/veRL/Hugging Face
+  # read, never a credential-like name (HF_TOKEN, WANDB_API_KEY, ...). List extra variable NAMES
+  # here, or as WORKBENCH_TRAIN__ENV_PASSTHROUGH='["HF_TOKEN"]', if a machine needs one; the
+  # dry run (`workbench train launch`) shows which names are passed and withheld.
+  env_passthrough: []
