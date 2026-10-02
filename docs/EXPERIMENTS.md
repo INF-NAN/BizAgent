@@ -6,7 +6,7 @@
 
 ## 要回答的问题
 
-1. 一个 4B 的开源模型（`Qwen/Qwen3-4B`，关闭思考）放进这套工作台，在从未见过的场景上能完成多少任务，失败集中在哪里。
+1. 一个 4B 的开源模型（`Qwen/Qwen3-4B-Instruct-2507`，非思考模型）放进这套工作台，在从未见过的场景上能完成多少任务，失败集中在哪里。
 2. 同一模型多次采样能覆盖多少任务（pass@k），即单次结果之外还有多少可挖掘的空间。
 3. 用更强的模型（教师，DeepSeek API）的轨迹训练小模型，哪种数据最有效：
    - 只用通过 verifier 的教师轨迹（教师蒸馏）；
@@ -22,7 +22,7 @@
 - 只用带 pure-code verifier 的任务（`gen_verifier.pure_code.jsonl`）。同一任务有多个 verifier 条目时取第一条，与 `awm verify` 的选择一致；选中的条目复制到 `data/lab/verifiers.code.jsonl`，每个 episode 只把自己的那一条写进运行目录，验证时不必重复加载整份 verifier 文件。
 - 按场景划分，不按任务划分（`workbench lab split`，`workbench.lab.splits`）：
   - 有 verifier 的场景按固定种子打乱，前 200 个作为 test，接下来 100 个作为 val，其余作为 train；
-  - 每个 split 内部再按种子打乱任务，取 test 300、val 100、train 1500 个任务；
+  - 每个 split 内部再按种子打乱任务，取 test 600、val 200、train 1500 个任务；train 场景里再留 1500 个任务作为备用（`train_extra`），只在教师解出的 train 任务太少时使用；
   - 训练数据只来自 train 场景。test 上的变化反映的是对未见过的环境（数据库、工具集、业务规则）的泛化，而不是记住了某个场景。
 - 另有注入实验用的 `inject` 任务集：只来自 test 场景中至少有一个 destructive 工具的场景（按网关的离线风险分级判断，与 `workbench gateway export-risk` 相同），取 200 个任务。只有这样的场景才能布置"诱导执行破坏性操作"的注入。
 - 划分写入 `data/lab/splits.json`（种子、每个 split 的场景与任务），同样的种子与数据修订得到同样的划分。
@@ -60,20 +60,31 @@
 
 | 运行（tag） | 模型 | split | 说明 |
 |---|---|---|---|
-| `null-test` | 无（从不回答） | test | verifier 下限：什么都不做也被判为成功的任务 |
-| `base-test`、`base-val` | Qwen3-4B | test、val | 温度 0，每个任务一次 |
-| `base-passk` | Qwen3-4B | test 前 150 个任务 | 温度 0.7，每个任务 4 次，pass@1、pass@2、pass@4 |
+| `null-test`、`null-val`、`null-train` | 无（从不回答） | test、val、train | verifier 下限：什么都不做也被判为成功的任务 |
+| `base-test`、`base-val` | Qwen3-4B-Instruct-2507 | test、val | 温度 0，每个任务一次 |
+| `base-passk` | Qwen3-4B-Instruct-2507 | test 前 150 个任务 | 温度 0.7，每个任务 4 次，pass@1、pass@2、pass@4 |
 | `teacher-train` | DeepSeek | train | 教师轨迹，训练数据来源 |
-| `teacher-test` | DeepSeek | test | 参考上界 |
-| `student-train` | Qwen3-4B | train | 温度 0.7，每个任务 2 次，拒绝采样的候选 |
+| `teacher-train-extra` | DeepSeek | train_extra | 只在 `teacher-train` 解出的任务少于 `TEACHER_MIN_SUCCESS`（默认 600）时运行 |
+| `teacher-test` | DeepSeek | test 前 300 个任务 | 参考上界 |
+| `student-train` | Qwen3-4B-Instruct-2507 | train | 温度 0.7，每个任务 2 次，拒绝采样的候选 |
 | `sft-<variant>-val-<ckpt>` | LoRA 各 checkpoint | val | 只用来选 checkpoint |
 | `sft-<variant>-test` | 选中的 checkpoint | test | 每个变体只评一次 |
-| `inj-a`、`inj-b`、`inj-c` | Qwen3-4B | inject | 注入实验的三种网关配置 |
+| `inj-a`、`inj-b`、`inj-c` | Qwen3-4B-Instruct-2507 | inject | 注入实验的三种网关配置 |
 | `inj-sft-a` | val 上最好的 LoRA | inject | 训练后的模型，配置 A |
 
 ### verifier 下限
 
-verifier 是上游为每个任务自动生成的代码，并不都可靠：有的任务在数据库没有任何改动、也没有回答时也会被判为 complete。`null-test` 用一个从不回答的模型（`--backend null`）跑一遍 test：智能体拿不到计划就结束，不调用任何工具，然后照常验证。这样通过的任务记为"平凡任务"。报告给出它们的数量，test 上每次运行另给去掉它们之后的成功率，每组配对比较也另给去掉它们之后的结果。这一步不用模型也不用 GPU。
+verifier 是上游为每个任务自动生成的代码，并不都可靠：有的任务在数据库没有任何改动、也没有回答时也会被判为 complete。`null-test` 用一个从不回答的模型（`--backend null`）跑一遍 test：智能体拿不到计划就结束，不调用任何工具，然后照常验证。这样通过的任务记为"平凡任务"，三处用到：
+
+- test：报告给出它们的数量，每次运行另给去掉它们之后的成功率，每组配对比较也另给去掉它们之后的结果；
+- val：选 checkpoint 只看非平凡任务上的成功率；
+- train：平凡任务上的"成功"不进入训练数据，模型不会从没做对事情的轨迹里学。
+
+这一步不用模型也不用 GPU。
+
+### 过程指标
+
+报告另列 test 上每次运行的过程指标：平均步数、每个 episode 的工具报错、有工具报错的比例、计划无效、LLM 错误、被守卫终止、没有调用工具的比例与 prompt token。它们不经过 verifier，比成功率对训练的反应更稳定，用来说明训练改变了什么。
 
 ### pass@k
 
@@ -85,25 +96,26 @@ verifier 是上游为每个任务自动生成的代码，并不都可靠：有�
 
 - 一个 episode 的每次 LLM 调用都是一对（消息，回复）。act 调用逐步延长同一段对话，所以一次调用的对话若是后面某次调用的前缀就丢弃，只保留最长的那段；plan 与 verify 调用是独立的对话，原样保留。
 - 每条样本带上请求时发送的工具列表，格式与发给推理服务的请求相同（`_tools_payload`）。
-- 三个变体：
+- 三个变体（都不含平凡任务）：
 
   | 变体 | 来源 | 过滤 |
   |---|---|---|
-  | `teacher` | `teacher-train` | 只用 verifier 判定成功的 episode |
-  | `rft` | `teacher-train` 与 `student-train` | 只用成功的 episode；每个任务最多 2 个，教师优先，避免容易的任务占满数据 |
-  | `unfiltered` | `teacher-train` | 所有正常结束的 episode，不看 verifier；按固定种子随机抽取，与 `teacher` 变体的 episode 数相同 |
+  | `teacher` | `teacher-train`（与 `teacher-train-extra`，如果运行了） | 只用 verifier 判定成功的 episode |
+  | `rft` | 教师的 episode 与 `student-train` | 只用成功的 episode；每个任务最多 2 个，教师优先，避免容易的任务占满数据 |
+  | `unfiltered` | 教师的 episode | 所有正常结束的 episode，不看 verifier；按固定种子随机抽取，与 `teacher` 变体的 episode 数相同 |
 
 训练（`scripts/lab/sft_train.py`，在 GPU 环境中运行）：
 
-- 从 `Qwen/Qwen3-4B` 出发，三个变体各训练一个 LoRA（rank 64、alpha 128，作用于全部线性层），bf16、梯度检查点。学习率 1e-4、cosine 调度、带 warmup，每步 16 条序列，2 个 epoch，每半个 epoch 存一个 checkpoint。其余超参见脚本参数的默认值。
+- 从 `Qwen/Qwen3-4B-Instruct-2507` 出发，三个变体各训练一个 LoRA（rank 64、alpha 128，作用于全部线性层），bf16、梯度检查点。学习率 1e-4、cosine 调度、带 warmup，每步 16 条序列，2 个 epoch，每半个 epoch 存一个 checkpoint。其余超参见脚本参数的默认值。
 - 样本用模型自己的 chat template 和同一份工具列表渲染，与 vLLM 渲染请求的方式相同；工具调用的参数先解析为对象，模板输出的 JSON 与推理时一致。
 - 只在 assistant 轮次上计算 loss：从 `<|im_start|>assistant\n` 之后到 `<|im_end|>`（含）。
-- 推理时关闭思考，每次生成都从一个空的 `<think>\n\n</think>\n\n` 之后开始；模板只给最后一轮写这个块，所以训练时在每个更早的 assistant 轮次前也插入它（不计 loss），保证每一轮的学习目标紧跟在推理时它前面的那段文本之后。代价是这些更早的轮次在后续轮次的上下文里多出这个空块，而推理时的历史里没有。已用 Qwen3-4B 的 tokenizer 核对过渲染与掩码。
-- 只在需要 loss 的位置计算 logits（`logits_to_keep` 传位置索引），超长样本（默认超过 24576 token）丢弃并计数。
+- 训练文本与推理时模型看到的文本逐字一致：对 Qwen3-4B-Instruct-2507，服务时每一轮的请求都正好是渲染后整段对话的前缀，所以每个 assistant 轮次都在与推理时相同的上文之后学习。训练开始前脚本会逐轮检查前 20 条样本，把"推理时 prompt 不是训练文本前缀"的轮次数写进 `train_meta.json` 的 `template_check`，对这个模型应为 0。
+- 选这个模型而不是混合思考的 `Qwen3-4B`，原因有两个。一是混合模板在关闭思考时只给最后一轮写空的思考块，训练与推理无法逐字一致，同样的检查下有一部分轮次对不上（脚本对这类模板会在更早的轮次前补上空块，并照实记录检查结果）。二是 2507 的上下文为 262144 token，工具多、轮次多的 episode 不会因为超过上下文而中断（vLLM 以 `MAX_MODEL_LEN`，默认 65536 启动）。
+- 只在需要 loss 的位置计算 logits（`logits_to_keep` 传位置索引），超长样本（默认超过 32768 token）丢弃并计数。
 
 选择与评测：
 
-- 一个 vLLM 进程以多 LoRA 方式同时服务全部 checkpoint（`--enable-lora --lora-modules ...`），每个 checkpoint 在 val 上跑一遍；每个变体选 val 成功率最高的 checkpoint（并列取更早的），只用它在 test 上评一次。test 不参与任何选择。
+- 一个 vLLM 进程以多 LoRA 方式同时服务全部 checkpoint（`--enable-lora --lora-modules ...`），每个 checkpoint 在 val 上跑一遍；每个变体选 val 非平凡任务上成功率最高的 checkpoint（并列取更早的），只用它在 test 上评一次。test 不参与任何选择。
 - `unfiltered` 与 `teacher` 的 episode 数相同，两者的差别只在"是否经过 verifier 过滤"，而不是数据量。
 - 某个变体的数据少于 `MIN_SFT_EPISODES`（默认 20）个 episode 时，跳过这个变体并在日志里说明，其余阶段照常进行。
 - 对比都在同一批 test 任务上配对进行：base 与每个变体、`teacher` 与 `rft`（自提升的作用）、`unfiltered` 与 `teacher`（过滤的作用）。每组报告仅一方成功的任务数、McNemar 精确检验的 p 值，以及成功率差的配对 bootstrap 95 区间（5000 次重采样）。
@@ -158,8 +170,8 @@ tail -f data/lab/run.log
    - 下载数据集与基座模型。
 
    AutoDL 上若存在 `/etc/network_turbo` 会先启用它，并默认使用 Hugging Face 镜像。
-2. 划分数据，跑 verifier 下限（`null-test`，只用 CPU）。
-3. 教师在后台运行（只占 API，不占 GPU）：先 `teacher-train`，再 `teacher-test`。
+2. 划分数据，在 test、val、train 上跑 verifier 下限（只用 CPU）。
+3. 教师在后台运行（只占 API，不占 GPU）：先 `teacher-train`；解出的任务不足 `TEACHER_MIN_SUCCESS` 时再跑 `teacher-train-extra`；最后 `teacher-test`。
 4. 前台在 GPU 上运行 base 模型：
    - 冒烟（val 的 8 个任务，出错过多即停止）；
    - `base-test`、`base-val`、`base-passk`、`student-train`；
@@ -189,7 +201,7 @@ mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_TRAIN_LIMIT=1
 
 耗时与花费（估计，不是测量）：
 
-- 评测的主要成本是 episode 数：base 模型共约 5000 个 episode，三个变体在 val 与 test 上约 2100 个，注入实验 800 个，verifier 下限 300 个（只用 CPU）。
+- 评测的主要成本是 episode 数：base 模型共约 5300 个 episode，三个变体在 val 与 test 上约 4200 个，注入实验 800 个，verifier 下限约 2300 个（只用 CPU）。
 - 三次 LoRA 训练各自取决于数据量。
 - 教师的 1800 个 episode 与 GPU 阶段并行，费用由 token 量决定。每次运行的 prompt 与 completion token 总量都记在 `results.jsonl`，可以按 `configs/pricing.yaml` 的价格自行核算；想少花，用 `TEACHER_TRAIN_LIMIT` 只让教师跑一部分训练任务。
 

@@ -128,7 +128,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 
 - 数据集与模型权重不提交进仓库，只提供下载方式：`make data`（`scripts/download_data.sh`，可用 `AWM1K_REVISION` 固定 revision）与 vLLM 的运行时下载。
 - 官方数据只读。自合成的环境只放在 `data/synth/<run>/`，manifest 标记 `origin: local-synth`，与官方数据隔离（ADR-011）。
-- 批量实验（docs/EXPERIMENTS.md）下载基座模型 `Qwen/Qwen3-4B`（Apache-2.0）到 `data/models/`，训练出的 LoRA adapter 与全部运行记录留在 `data/lab/`，都不入库。教师轨迹来自 DeepSeek API 的输出；用这些输出训练模型之前，请自行确认 DeepSeek 服务条款中的相关规定。
+- 批量实验（docs/EXPERIMENTS.md）下载基座模型 `Qwen/Qwen3-4B-Instruct-2507`（Apache-2.0）到 `data/models/`，训练出的 LoRA adapter 与全部运行记录留在 `data/lab/`，都不入库。教师轨迹来自 DeepSeek API 的输出；用这些输出训练模型之前，请自行确认 DeepSeek 服务条款中的相关规定。
 
 ## 5. 署名（CC-BY-4.0）
 

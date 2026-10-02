@@ -467,6 +467,8 @@
 - 决定：新增 `workbench lab` 与 `scripts/lab/`，实验设计在运行前写定（docs/EXPERIMENTS.md）：
   - 被测对象是"模型 + 本工作台"的整体，任务、verifier 与数据只来自官方数据集，固定修订；
   - 按场景划分 train / val / test，训练数据只来自 train 场景，checkpoint 只在 val 上选，每个变体在 test 上只评一次；
+  - 基座用非思考模型 Qwen3-4B-Instruct-2507：训练文本与推理时的请求逐字一致（训练脚本逐轮检查并记录），上下文足够长，不因超长中断；
+  - 提高结论确定性的设计都不碰 test：test 600 个任务以提高配对检验的功效；val 200 个任务、只看非平凡任务选 checkpoint；训练数据去掉平凡任务；教师解出的 train 任务不够时自动加跑备用任务；报告另列不经 verifier 的过程指标；
   - 成功只由官方 verifier 判定（`reward_type` 为 `complete`），不用模型自评；
   - verifier 本身会误判：先用一个从不回答的模型跑一遍 test，记下什么都不做也被判为 complete 的任务，报告另给去掉这些任务后的成功率与配对比较；
   - 比较都在同一批任务上配对：McNemar 精确检验与配对 bootstrap 区间，单个比率附 Wilson 区间，pass@k 用无偏估计；
