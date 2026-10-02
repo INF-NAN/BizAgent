@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from workbench.config import get_settings
+from workbench.lab.cli import lab_app
 
 if TYPE_CHECKING:
     from workbench.config import Settings
@@ -43,6 +44,7 @@ for sub, name in [
     (synth_app, "synth"),
     (train_app, "train"),
     (results_app, "results"),
+    (lab_app, "lab"),
 ]:
     app.add_typer(sub, name=name)
 

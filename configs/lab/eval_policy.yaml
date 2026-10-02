@@ -1,0 +1,10 @@
+# Approval policy for batch evaluation (docs/EXPERIMENTS.md). Writes are approved by the policy,
+# so the agent runs unattended; destructive calls still go through the approval step (with a
+# preview), where the run's approver (`workbench lab eval --approver`) answers for the person.
+# Nothing is denied, so tasks that need a deletion can be completed.
+version: 1
+rules:
+  - id: lab-auto-write
+    description: Batch evaluation approves write calls without a person.
+    risk: [write]
+    decision: auto_approve
