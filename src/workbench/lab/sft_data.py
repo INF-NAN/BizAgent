@@ -11,6 +11,7 @@ renders with the model's chat template, so training sees the same text the model
 from __future__ import annotations
 
 import json
+import random
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -75,48 +76,59 @@ def build(
     *,
     include_failed: bool = False,
     max_per_task: int | None = None,
+    max_episodes: int | None = None,
+    seed: int = 0,
 ) -> dict[str, Any]:
     """Write ``out`` (one JSON sample per line) from the episodes of ``run_dirs``.
 
     Only verified successes are used unless ``include_failed`` (the unfiltered ablation keeps
     every episode that ran to the end). ``max_per_task`` caps the episodes kept per task across
     all run dirs, in the order given, so tasks the model already solves often do not dominate.
+    ``max_episodes`` keeps a seeded random subset of that many episodes, so an ablation can use
+    as many episodes as the variant it is compared with.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     stats: Counter[str] = Counter()
     scenarios: set[str] = set()
     per_task: Counter[str] = Counter()
+    chosen: list[tuple[Path, dict[str, Any]]] = []
+    for run_dir in run_dirs:
+        for r in load_results(run_dir / "results.jsonl"):
+            stats["episodes"] += 1
+            if r.get("status") != "ok" or not (r.get("success") or include_failed):
+                continue
+            if not (run_dir / "calls" / f"{r['run_id']}.json.gz").is_file():
+                stats["missing_recording"] += 1
+                continue
+            task_key = f"{r['scenario']}#{r['task_id']}"
+            if max_per_task is not None and per_task[task_key] >= max_per_task:
+                stats["capped"] += 1
+                continue
+            per_task[task_key] += 1
+            chosen.append((run_dir, r))
+    if max_episodes is not None and len(chosen) > max_episodes:
+        keep = set(random.Random(seed).sample(range(len(chosen)), max_episodes))
+        stats["subsampled_out"] = len(chosen) - max_episodes
+        chosen = [c for i, c in enumerate(chosen) if i in keep]
+    tasks = {f"{r['scenario']}#{r['task_id']}" for _, r in chosen}
     with out.open("w", encoding="utf-8") as f:
-        for run_dir in run_dirs:
-            for r in load_results(run_dir / "results.jsonl"):
-                stats["episodes"] += 1
-                if r.get("status") != "ok" or not (r.get("success") or include_failed):
-                    continue
-                task_key = f"{r['scenario']}#{r['task_id']}"
-                if max_per_task is not None and per_task[task_key] >= max_per_task:
-                    stats["capped"] += 1
-                    continue
-                per_task[task_key] += 1
-                path = run_dir / "calls" / f"{r['run_id']}.json.gz"
-                if not path.is_file():
-                    stats["missing_recording"] += 1
-                    continue
-                recording = load_recording(path)
-                tools = _tools_payload(recording["tools"]) if recording["tools"] else []
-                stats["used_episodes"] += 1
-                stats["used_successful_episodes"] += 1 if r.get("success") else 0
-                stats[f"used_from:{run_dir.name}"] += 1
-                scenarios.add(r["scenario"])
-                for conv in conversations(recording):
-                    sample = {
-                        "messages": conv["messages"],
-                        "tools": tools if conv["with_tools"] else [],
-                        "meta": {"run_id": r["run_id"], "scenario": r["scenario"], "tag": r["tag"]},
-                    }
-                    f.write(json.dumps(sample, ensure_ascii=False) + "\n")
-                    stats["samples"] += 1
-                    stats["samples_with_tools" if conv["with_tools"] else "samples_without_tools"] += 1
-                    stats["assistant_turns"] += sum(1 for m in conv["messages"] if m["role"] == "assistant")
-    summary = {**stats, "tasks": len(per_task), "scenarios": len(scenarios), "out": str(out)}
+        for run_dir, r in chosen:
+            recording = load_recording(run_dir / "calls" / f"{r['run_id']}.json.gz")
+            tools = _tools_payload(recording["tools"]) if recording["tools"] else []
+            stats["used_episodes"] += 1
+            stats["used_successful_episodes"] += 1 if r.get("success") else 0
+            stats[f"used_from:{run_dir.name}"] += 1
+            scenarios.add(r["scenario"])
+            for conv in conversations(recording):
+                sample = {
+                    "messages": conv["messages"],
+                    "tools": tools if conv["with_tools"] else [],
+                    "meta": {"run_id": r["run_id"], "scenario": r["scenario"], "tag": r["tag"]},
+                }
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+                stats["samples"] += 1
+                stats["samples_with_tools" if conv["with_tools"] else "samples_without_tools"] += 1
+                stats["assistant_turns"] += sum(1 for m in conv["messages"] if m["role"] == "assistant")
+    summary = {**stats, "tasks": len(tasks), "scenarios": len(scenarios), "out": str(out)}
     out.with_suffix(".stats.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary

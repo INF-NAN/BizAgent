@@ -31,6 +31,7 @@ from workbench.gateway.core import CallOutcome, Gateway
 from workbench.lab.recorder import CURRENT_EPISODE, RecordingBackend, save_recording
 from workbench.lab.splits import LabTask
 from workbench.llm.client import LLMClient, build_backend
+from workbench.llm.types import ChatBackend, ChatResult, Message
 from workbench.runtime import Runtime
 from workbench.verify import VerifyError, run_verify
 
@@ -68,6 +69,29 @@ def preview_guard(event: dict[str, Any]) -> tuple[bool, str]:
 
 
 APPROVERS: dict[str, Approver] = {"auto": approve_all, "preview-guard": preview_guard}
+
+
+class NullBackend:
+    """A model that never answers: the agent ends without touching the environment.
+
+    Running it over a split measures which tasks the verifier passes on an unchanged database
+    with no answer, i.e. the verifier's floor; the report also compares runs without those tasks.
+    """
+
+    name = "null"
+
+    async def chat(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> ChatResult:
+        return ChatResult(content="", model="null")
+
+    async def aclose(self) -> None:
+        return None
 
 
 def episode_id(task: LabTask, sample: int) -> str:
@@ -222,6 +246,7 @@ class EpisodeRunner:
         env_service: EnvService | None = None,
         gateway: Gateway | None = None,
         verify_fn: VerifyFn = run_verify,
+        backend: ChatBackend | None = None,
     ) -> None:
         self.settings = settings
         self.cfg = cfg
@@ -229,7 +254,7 @@ class EpisodeRunner:
         self.verify_fn = verify_fn
         self.root = cfg.out_dir / "runs" / cfg.tag
         self.results = self.root / "results.jsonl"
-        self.recorder = RecordingBackend(build_backend(settings.llm))
+        self.recorder = RecordingBackend(backend or build_backend(settings.llm))
         llm = LLMClient(self.recorder, settings.llm)
         self.rt = Runtime(
             settings, env_service=env_service, gateway=gateway, llm=llm, checkpointer=InMemorySaver()
@@ -300,6 +325,7 @@ class EpisodeRunner:
         self._summarise(record, events, approvals, recording)
         if record["status"] == "ok":
             await self._verify(task, sid, record)
+        self.rt.hub.forget(sid)
         if not self.cfg.keep_envs:
             shutil.rmtree(self.settings.env.runs_dir / sid, ignore_errors=True)
         return record

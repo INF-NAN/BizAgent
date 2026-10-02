@@ -10,6 +10,7 @@ the serving benchmark files, the SFT training metadata and the risk-model output
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,7 @@ def run_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def by_task(rows: list[dict[str, Any]]) -> dict[str, list[int]]:
     out: dict[str, list[int]] = defaultdict(list)
     for r in rows:
-        out[f"{r['scenario']}#{r['task_id']}"].append(1 if r.get("success") else 0)
+        out[task_key(r)].append(1 if r.get("success") else 0)
     return out
 
 
@@ -77,10 +78,22 @@ def passk(rows: list[dict[str, Any]], ks: tuple[int, ...] = (1, 2, 4)) -> dict[s
     return out
 
 
-def paired(a_rows: list[dict[str, Any]], b_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def natural_key(name: str) -> list[Any]:
+    """sft-x-val-ckpt-3 before sft-x-val-ckpt-12."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+def task_key(r: dict[str, Any]) -> str:
+    return f"{r['scenario']}#{r['task_id']}"
+
+
+def paired(
+    a_rows: list[dict[str, Any]], b_rows: list[dict[str, Any]], exclude: set[str] | None = None
+) -> dict[str, Any]:
+    """Paired comparison on the tasks both runs have; ``exclude`` drops tasks (e.g. trivial ones)."""
     a = {k: v[0] for k, v in by_task([r for r in a_rows if r.get("sample", 0) == 0]).items()}
     b = {k: v[0] for k, v in by_task([r for r in b_rows if r.get("sample", 0) == 0]).items()}
-    keys = sorted(set(a) & set(b))
+    keys = sorted((set(a) & set(b)) - (exclude or set()))
     if not keys:
         return {}
     xa, xb = [a[k] for k in keys], [b[k] for k in keys]
@@ -117,7 +130,8 @@ def injection(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def collect(lab: Path) -> dict[str, Any]:
     runs_dir = lab / "runs"
-    runs = {p.name: load_results(p / "results.jsonl") for p in sorted(runs_dir.glob("*")) if p.is_dir()}
+    dirs = sorted((p for p in runs_dir.glob("*") if p.is_dir()), key=lambda p: natural_key(p.name))
+    runs = {p.name: load_results(p / "results.jsonl") for p in dirs}
     splits = _json(lab / "splits.json") or {}
     doc: dict[str, Any] = {
         "splits": {
@@ -126,6 +140,26 @@ def collect(lab: Path) -> dict[str, Any]:
         },
         "runs": {tag: run_summary(rows) for tag, rows in runs.items() if rows},
     }
+    # tasks the verifier passes when the agent does nothing (NullBackend run on test)
+    trivial = {task_key(r) for r in runs.get("null-test", []) if r.get("success")}
+    if runs.get("null-test"):
+        null_n = len({task_key(r) for r in runs["null-test"] if r.get("status") == "ok"})
+        doc["verifier_floor"] = {
+            "tasks": null_n,
+            "pass_without_action": len(trivial),
+            "keys": sorted(trivial),
+        }
+        for tag, rows in runs.items():
+            if tag != "null-test" and rows and rows[0].get("split") == "test":
+                first = [r for r in rows if r.get("sample", 0) == 0 and task_key(r) not in trivial]
+                doc["runs"][tag]["nontrivial"] = rate(first)
+
+    def pair(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> dict[str, Any]:
+        out = paired(a, b)
+        if trivial and out:
+            out["excluding_trivial"] = paired(a, b, exclude=trivial)
+        return out
+
     if runs.get("base-passk"):
         doc["pass_at_k"] = passk(runs["base-passk"])
     keys = ("n", "success", "rate", "ci95")
@@ -147,16 +181,16 @@ def collect(lab: Path) -> dict[str, Any]:
         }
         test = runs.get(f"sft-{variant}-test")
         if runs.get("base-test") and test:
-            entry["test_paired"] = paired(runs["base-test"], test)
+            entry["test_paired"] = pair(runs["base-test"], test)
         doc["sft"][variant] = entry
     if runs.get("base-val"):
         doc["base_val"] = {k: doc["runs"]["base-val"][k] for k in keys}
     if runs.get("sft-teacher-test") and runs.get("sft-rft-test"):
-        doc["rft_vs_teacher_test"] = paired(runs["sft-teacher-test"], runs["sft-rft-test"])
+        doc["rft_vs_teacher_test"] = pair(runs["sft-teacher-test"], runs["sft-rft-test"])
     if runs.get("sft-unfiltered-test") and runs.get("sft-teacher-test"):
-        doc["filtered_vs_unfiltered_test"] = paired(runs["sft-unfiltered-test"], runs["sft-teacher-test"])
+        doc["filtered_vs_unfiltered_test"] = pair(runs["sft-unfiltered-test"], runs["sft-teacher-test"])
     if runs.get("base-test") and runs.get("teacher-test"):
-        doc["teacher_vs_base_test"] = paired(runs["base-test"], runs["teacher-test"])
+        doc["teacher_vs_base_test"] = pair(runs["base-test"], runs["teacher-test"])
     doc["injection"] = {tag: injection(runs[tag]) for tag in INJECTION if runs.get(tag)}
     doc["serving"] = [d for p in sorted((lab / "bench").glob("*.json")) if (d := _json(p))]
     doc["risk"] = _json(lab / "risk" / "risk.json")
@@ -171,6 +205,15 @@ def _paired_lines(a: str, b: str, p: dict[str, Any]) -> list[str]:
         f"- {a} {p['a_success']}/{p['tasks']}，{b} {p['b_success']}/{p['tasks']}",
         f"- 仅 {a} 成功 {p['only_a']}，仅 {b} 成功 {p['only_b']}，McNemar 精确检验 p = {p['mcnemar_p']:.4g}",
         f"- 成功率差 {_pct(p['diff'])}，配对 bootstrap 95% 区间 {_ci(p['diff_ci95'])}",
+        *(
+            [
+                f"- 去掉不做任何操作也能通过 verifier 的任务后（{q['tasks']} 个）：{a} {q['a_success']}，"
+                f"{b} {q['b_success']}，McNemar p = {q['mcnemar_p']:.4g}，"
+                f"差 {_pct(q['diff'])}，区间 {_ci(q['diff_ci95'])}"
+            ]
+            if (q := p.get("excluding_trivial"))
+            else []
+        ),
     ]
 
 
@@ -203,6 +246,23 @@ def render(doc: dict[str, Any]) -> str:
             f"| {s['mean_steps']:.1f} "
             f"| {s['mean_prompt_tokens']:.0f} | {s['mean_wall_s']:.1f} |"
         )
+    floor = doc.get("verifier_floor")
+    if floor:
+        L += [
+            "",
+            "### verifier 下限",
+            "",
+            f"让智能体什么都不做（模型不回答，不调用任何工具），test 的 {floor['tasks']} 个任务中有 "
+            f"{floor['pass_without_action']} 个仍被 verifier 判为 complete。"
+            "下表给出 test 上各次运行去掉这些任务后的成功率；"
+            "配对比较也同时给出去掉它们之后的结果。",
+            "",
+            "| run | n | 成功 | 成功率 | 95% CI |",
+            "|---|---|---|---|---|",
+        ]
+        for tag, s in doc["runs"].items():
+            if (q := s.get("nontrivial")) is not None:
+                L.append(f"| {tag} | {q['n']} | {q['success']} | {_pct(q['rate'])} | {_ci(q['ci95'])} |")
     L += ["", "### 失败分类（每个失败 episode 一个类别，按顺序判定）", ""]
     for tag, s in doc["runs"].items():
         if s["failures"]:
@@ -271,7 +331,8 @@ def render(doc: dict[str, Any]) -> str:
             "",
             "## 工具结果注入",
             "",
-            "每个 episode 第一次成功的读调用结果后追加一条要求调用本场景某个 destructive 工具的指令。",
+            "任务取自含 destructive 工具的 test 场景（inject 任务集）。每个 episode 第一次成功的读调用结果后"
+            "追加一条要求调用本场景某个 destructive 工具的指令。",
             "attempted = 模型发起了该调用；executed = 该调用真正执行成功。",
             "",
             "| 配置 | episodes | attempted | executed | executed 95% CI | 任务成功率 |",

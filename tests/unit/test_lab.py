@@ -189,7 +189,7 @@ def code_verify(settings: Settings, run_dir: Path, **kw: Any) -> dict[str, Any]:
     return {"reward_type": out["result"]}
 
 
-async def _run(tmp_path: Path, *, inject: bool = False) -> list[dict[str, Any]]:
+async def _run(tmp_path: Path, *, inject: bool = False, backend: Any = None) -> list[dict[str, Any]]:
     lab = tmp_path / "lab"
     tasks = splits.load_tasks(MINI)
     verifiers = splits.load_verifier_index(MINI)
@@ -221,6 +221,7 @@ async def _run(tmp_path: Path, *, inject: bool = False) -> list[dict[str, Any]]:
         env_service=FakeEnvService(runs_dir),
         gateway=gateway,
         verify_fn=code_verify,
+        **({"backend": backend} if backend is not None else {}),
     )
     return load_results(path)
 
@@ -306,3 +307,92 @@ async def test_serving_bench_replays_episodes() -> None:
     assert out["prompt_tokens_mean"] == 50
     assert all(b["ignore_eos"] and b["tool_choice"] == "none" and b["max_tokens"] == 4 for b in seen)
     assert seen[0]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+async def test_null_agent_touches_nothing(tmp_path: Path) -> None:
+    from workbench.lab.episodes import NullBackend
+
+    r = (await _run(tmp_path, backend=NullBackend()))[0]
+    assert r["status"] == "ok" and r["tool_calls"] == 0 and r["db_diff"] == {}
+    assert r["success"] is False  # the fixture's verifier needs a cart item
+
+
+def _fake_run(root: Path, tag: str, rows: list[dict[str, Any]]) -> Path:
+    from workbench.lab.recorder import save_recording
+
+    d = root / "runs" / tag
+    d.mkdir(parents=True)
+    with (d / "results.jsonl").open("w") as f:
+        for r in rows:
+            r = {"tag": tag, "status": "ok", "sample": 0, "split": "test", **r}
+            f.write(json.dumps(r) + "\n")
+            rec = {"tools": [], "calls": [_call([{"role": "user", "content": r["run_id"]}], content="a")]}
+            save_recording(d / "calls" / f"{r['run_id']}.json.gz", rec)
+    return d
+
+
+def test_sft_build_filters_caps_and_subsamples(tmp_path: Path) -> None:
+    rows = [
+        {"run_id": f"s{i}__0__s0", "scenario": f"s{i}", "task_id": 0, "success": i % 2 == 0}
+        for i in range(10)
+    ]
+    d = _fake_run(tmp_path, "teacher", rows)
+    ok = sft_data.build([d], tmp_path / "a.jsonl")
+    assert ok["used_episodes"] == 5 and ok["used_successful_episodes"] == 5
+    every = sft_data.build([d], tmp_path / "b.jsonl", include_failed=True, max_episodes=5)
+    assert every["used_episodes"] == 5 and every["subsampled_out"] == 5
+    again = sft_data.build([d], tmp_path / "c.jsonl", include_failed=True, max_episodes=5)
+    assert (tmp_path / "b.jsonl").read_text() == (tmp_path / "c.jsonl").read_text()  # seeded
+    capped = sft_data.build([d, d], tmp_path / "d.jsonl", max_per_task=1)
+    assert capped["used_episodes"] == 5 and capped["capped"] == 5
+    assert again["tasks"] == 5
+
+
+def test_report_excludes_tasks_the_verifier_passes_without_action(tmp_path: Path) -> None:
+    def rows(succ: list[int]) -> list[dict[str, Any]]:
+        return [
+            {"run_id": f"s{i}__0__s0", "scenario": f"s{i}", "task_id": 0, "success": i in succ}
+            for i in range(6)
+        ]
+
+    _fake_run(tmp_path, "null-test", rows([0]))
+    _fake_run(tmp_path, "base-test", rows([0, 1]))
+    _fake_run(tmp_path, "sft-teacher-test", rows([0, 1, 2, 3]))
+    (tmp_path / "sft" / "teacher").mkdir(parents=True)
+    doc = collect(tmp_path)
+    assert doc["verifier_floor"]["pass_without_action"] == 1
+    assert doc["runs"]["base-test"]["nontrivial"]["n"] == 5
+    assert doc["runs"]["base-test"]["nontrivial"]["success"] == 1
+    p = doc["sft"]["teacher"]["test_paired"]
+    assert p["tasks"] == 6 and p["only_b"] == 2
+    assert p["excluding_trivial"]["tasks"] == 5 and p["excluding_trivial"]["b_success"] == 3
+    text = render(doc)
+    assert "verifier 下限" in text and "去掉不做任何操作也能通过" in text
+
+
+def test_trace_hub_forget() -> None:
+    from workbench.obs.tracing import TraceHub
+
+    hub = TraceHub(None)
+    hub.emit("s", "x")
+    assert hub.events("s")
+    hub.forget("s")
+    assert hub.events("s") == []
+
+
+def test_inject_split_only_uses_test_scenarios_with_destructive_tools() -> None:
+    tasks = {f"s{i}": [f"t{i}.{j}" for j in range(3)] for i in range(12)}
+    verifiers = {(s, j): {} for s in tasks for j in range(3)}
+    kw: dict[str, Any] = {"scenario_counts": {"test": 4, "val": 2}, "task_counts": {"inject": 5}}
+    base = splits.make_split(tasks, verifiers, seed=3, **kw)
+    test_scen = {t.scenario for t in base["test"]}
+    risky = {sorted(test_scen)[0], sorted(test_scen)[1], "s_not_in_test"}
+    out = splits.make_split(tasks, verifiers, seed=3, inject_scenarios=risky, **kw)
+    assert {t.scenario for t in out["inject"]} <= risky & test_scen
+    assert len(out["inject"]) == 5 and all(t.split == "inject" for t in out["inject"])
+    assert out["train"] == base["train"] and out["test"] == base["test"]  # inject changes nothing else
+
+
+def test_destructive_scenarios_on_the_mini_fixture() -> None:
+    found = splits.destructive_scenarios(MINI, Path("configs/tool_policy.yaml"))
+    assert found == {"mini_e_commerce"}  # delete_user_payment_method

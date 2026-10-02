@@ -15,7 +15,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from workbench.envs.catalog import normalize_scenario_name
+
 SPLITS = ("train", "val", "test")
+# the injection experiment's tasks: test scenarios that have at least one destructive tool
+INJECT = "inject"
 CODE_VERIFIERS = "gen_verifier.pure_code.jsonl"
 
 
@@ -37,16 +41,40 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def load_tasks(dataset_dir: Path) -> dict[str, list[str]]:
-    return {row["scenario"]: list(row["tasks"]) for row in _jsonl(dataset_dir / "gen_tasks.jsonl")}
+    """Tasks per scenario, keyed by the normalized scenario name (as awm and the env-manager use it)."""
+    return {
+        normalize_scenario_name(row["scenario"]): list(row["tasks"])
+        for row in _jsonl(dataset_dir / "gen_tasks.jsonl")
+    }
 
 
 def load_verifier_index(dataset_dir: Path) -> dict[tuple[str, int], dict[str, Any]]:
-    """First code-verifier entry per (scenario, task_idx), like awm's find_scenario_entry."""
+    """First code-verifier entry per (normalized scenario, task_idx), like awm's find_scenario_entry."""
     index: dict[tuple[str, int], dict[str, Any]] = {}
     for row in _jsonl(dataset_dir / CODE_VERIFIERS):
-        key = (row["scenario"], int(row["task_idx"]))
+        if row.get("task_idx") is None:
+            continue
+        key = (normalize_scenario_name(str(row["scenario"])), int(row["task_idx"]))
         index.setdefault(key, row)
     return index
+
+
+def destructive_scenarios(dataset_dir: Path, policy_file: Path) -> set[str]:
+    """Scenarios with at least one tool the gateway grades destructive (offline, like export-risk)."""
+    from workbench.envs.catalog import build_catalog, iter_route_methods
+    from workbench.gateway.policy import PolicyConfig, classify
+
+    policy = PolicyConfig.load(policy_file)
+    methods = dict(iter_route_methods(dataset_dir))
+    out = set()
+    for scenario in build_catalog(dataset_dir):
+        route = methods.get(scenario.name, {})
+        if any(
+            classify(t, "", policy, scenario.name, http_method=route.get(t)).level == "destructive"
+            for t in scenario.tool_names
+        ):
+            out.add(normalize_scenario_name(scenario.name))
+    return out
 
 
 def make_split(
@@ -56,7 +84,10 @@ def make_split(
     seed: int,
     scenario_counts: dict[str, int],
     task_counts: dict[str, int],
+    inject_scenarios: set[str] | None = None,
 ) -> dict[str, list[LabTask]]:
+    """train / val / test by scenario; with ``inject_scenarios``, also an ``inject`` task set drawn
+    from the test scenarios among them (it may share tasks with ``test``, never with train)."""
     scenarios = sorted(s for s, ts in tasks.items() if any((s, i) in verifiers for i in range(len(ts))))
     rng = random.Random(seed)
     rng.shuffle(scenarios)
@@ -77,6 +108,16 @@ def make_split(
         rng_split = random.Random(f"{seed}:{split}")
         rng_split.shuffle(pool)
         out[split] = pool[: task_counts.get(split, len(pool))]
+    if inject_scenarios is not None:
+        pool = [
+            LabTask(f"{s}#{i}", s, i, text, INJECT)
+            for s in groups["test"]
+            if s in inject_scenarios
+            for i, text in enumerate(tasks[s])
+            if (s, i) in verifiers
+        ]
+        random.Random(f"{seed}:{INJECT}").shuffle(pool)
+        out[INJECT] = pool[: task_counts.get(INJECT, len(pool))]
     return out
 
 
@@ -107,4 +148,7 @@ def read_split(out_dir: Path, name: str) -> list[LabTask]:
 
 
 def read_verifiers(out_dir: Path) -> dict[tuple[str, int], dict[str, Any]]:
-    return {(r["scenario"], int(r["task_idx"])): r for r in _jsonl(out_dir / "verifiers.code.jsonl")}
+    return {
+        (normalize_scenario_name(str(r["scenario"])), int(r["task_idx"])): r
+        for r in _jsonl(out_dir / "verifiers.code.jsonl")
+    }

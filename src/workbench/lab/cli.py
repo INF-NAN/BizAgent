@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 from pathlib import Path
 
 import typer
@@ -19,18 +20,28 @@ LAB_DIR = Path("data/lab")
 @lab_app.command("split")
 def lab_split(
     dataset_dir: Path | None = typer.Option(None, "--dataset-dir", help="Default: env.dataset_dir."),
-    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir"),
+    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
     seed: int = typer.Option(20260601, "--seed"),
     test_scenarios: int = typer.Option(200, "--test-scenarios"),
     val_scenarios: int = typer.Option(100, "--val-scenarios"),
     test_tasks: int = typer.Option(300, "--test-tasks"),
     val_tasks: int = typer.Option(100, "--val-tasks"),
     train_tasks: int = typer.Option(1500, "--train-tasks"),
+    inject_tasks: int = typer.Option(
+        200, "--inject-tasks", help="Tasks from test scenarios that have a destructive tool (0: none)."
+    ),
 ) -> None:
     """Split scenarios into train / val / test and sample tasks from each (deterministic)."""
-    from workbench.lab.splits import load_tasks, load_verifier_index, make_split, write_split
+    from workbench.lab.splits import (
+        destructive_scenarios,
+        load_tasks,
+        load_verifier_index,
+        make_split,
+        write_split,
+    )
 
-    ds = dataset_dir or get_settings().env.dataset_dir
+    settings = get_settings()
+    ds = dataset_dir or settings.env.dataset_dir
     tasks = load_tasks(ds)
     verifiers = load_verifier_index(ds)
     split = make_split(
@@ -38,7 +49,8 @@ def lab_split(
         verifiers,
         seed=seed,
         scenario_counts={"test": test_scenarios, "val": val_scenarios},
-        task_counts={"test": test_tasks, "val": val_tasks, "train": train_tasks},
+        task_counts={"test": test_tasks, "val": val_tasks, "train": train_tasks, "inject": inject_tasks},
+        inject_scenarios=destructive_scenarios(ds, settings.gateway.policy_file) if inject_tasks else None,
     )
     path = write_split(lab_dir, split, verifiers, seed)
     for name, ts in split.items():
@@ -50,8 +62,10 @@ def lab_split(
 def lab_eval(
     split: str = typer.Option(..., "--split", help="train | val | test"),
     tag: str = typer.Option(..., "--tag", help="Run name; results go to <lab-dir>/runs/<tag>/."),
-    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir"),
-    backend: str = typer.Option("vllm", "--backend", help="vllm | openai_compat | mock_replay"),
+    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
+    backend: str = typer.Option(
+        "vllm", "--backend", help="vllm | openai_compat | mock_replay | null (never answers: verifier floor)"
+    ),
     base_url: str | None = typer.Option(None, "--base-url"),
     model: str | None = typer.Option(None, "--model"),
     api_key_env: str | None = typer.Option(None, "--api-key-env"),
@@ -73,7 +87,7 @@ def lab_eval(
     ),
 ) -> None:
     """Run the agent on a split, verify every episode, append to results.jsonl (resumable)."""
-    from workbench.lab.episodes import APPROVERS, EvalConfig, lab_settings, run_eval
+    from workbench.lab.episodes import APPROVERS, EvalConfig, NullBackend, lab_settings, run_eval
     from workbench.lab.report import run_summary
     from workbench.lab.splits import read_split, read_verifiers
 
@@ -82,7 +96,7 @@ def lab_eval(
     base = get_settings()
     llm = base.llm.model_copy(
         update={
-            "backend": backend,
+            "backend": "mock_replay" if backend == "null" else backend,
             "temperature": temperature,
             "enable_thinking": enable_thinking,
             "max_tokens": max_tokens,
@@ -112,7 +126,7 @@ def lab_eval(
         concurrency=concurrency,
         approver=approver,
         inject=inject,
-        model_label=model or llm.model,
+        model_label="null" if backend == "null" else (model or llm.model),
         keep_envs=keep_envs,
     )
     meta = {
@@ -130,7 +144,22 @@ def lab_eval(
     }
     run_root.mkdir(parents=True, exist_ok=True)
     (run_root / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
-    path = asyncio.run(run_eval(settings, tasks, cfg, read_verifiers(lab_dir)))
+    extra = {"backend": NullBackend()} if backend == "null" else {}
+
+    async def main() -> Path:
+        # SIGTERM / SIGINT cancel the run, so every open environment is closed on the way out
+        task = asyncio.current_task()
+        assert task is not None
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, task.cancel)
+        return await run_eval(settings, tasks, cfg, read_verifiers(lab_dir), **extra)
+
+    try:
+        path = asyncio.run(main())
+    except asyncio.CancelledError:
+        console.print(f"[yellow]{tag}: stopped; finished episodes are kept and the run resumes from them[/]")
+        raise typer.Exit(code=130) from None
     from workbench.lab.episodes import load_results
 
     s = run_summary(load_results(path))
@@ -145,15 +174,27 @@ def lab_eval(
 def lab_sft_data(
     runs: list[str] = typer.Option(..., "--run", help="Run tag to read (repeatable, in priority order)."),
     out: Path = typer.Option(..., "--out"),
-    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir"),
+    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
     include_failed: bool = typer.Option(False, "--include-failed", help="Unfiltered ablation."),
     max_per_task: int | None = typer.Option(None, "--max-per-task"),
+    max_episodes: int | None = typer.Option(
+        None, "--max-episodes", help="Seeded random subset of this many episodes."
+    ),
+    match_stats: Path | None = typer.Option(
+        None, "--match", help="Use as many episodes as the stats file of another variant reports."
+    ),
 ) -> None:
     """Build chat-format SFT samples from recorded episodes."""
     from workbench.lab.sft_data import build
 
+    if match_stats is not None:
+        max_episodes = int(json.loads(match_stats.read_text(encoding="utf-8"))["used_episodes"])
     summary = build(
-        [lab_dir / "runs" / r for r in runs], out, include_failed=include_failed, max_per_task=max_per_task
+        [lab_dir / "runs" / r for r in runs],
+        out,
+        include_failed=include_failed,
+        max_per_task=max_per_task,
+        max_episodes=max_episodes,
     )
     console.print_json(data=summary)
 
@@ -161,7 +202,7 @@ def lab_sft_data(
 @lab_app.command("select")
 def lab_select(
     variant: str = typer.Option(..., "--variant"),
-    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir"),
+    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
 ) -> None:
     """Pick the checkpoint with the best val success rate (ties: the earlier one)."""
     from workbench.lab.episodes import load_results
@@ -193,7 +234,7 @@ def lab_bench(
     model: str = typer.Option(..., "--model"),
     concurrency: str = typer.Option("1,8,32", "--concurrency"),
     max_tokens: int = typer.Option(256, "--max-tokens"),
-    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir"),
+    lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
 ) -> None:
     """Replay recorded agent requests at several concurrency levels; write <lab-dir>/bench/<label>.json."""
     from workbench.lab.serving_bench import bench
@@ -218,7 +259,7 @@ def lab_bench(
 
 
 @lab_app.command("report")
-def lab_report(lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir")) -> None:
+def lab_report(lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR")) -> None:
     """Write <lab-dir>/summary.json and <lab-dir>/REPORT.md from everything that has run."""
     from workbench.lab.report import write_report
 
