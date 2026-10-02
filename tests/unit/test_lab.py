@@ -517,3 +517,21 @@ async def test_infrastructure_failures_are_retried_within_the_run(tmp_path: Path
     rows = await _run(tmp_path, verify_fn=flaky, backend=backend)
     assert calls["n"] == 2
     assert len(rows) == 1 and rows[0]["status"] == "ok" and rows[0]["success"] is True
+
+
+def test_db_diff_with_blob_keys_is_written(tmp_path: Path) -> None:
+    from workbench.lab.episodes import _dumps, json_safe
+
+    diff = {
+        "items_fts_idx": {
+            "rows_before": 8,
+            "rows_after": 9,
+            "added": [(8, b"")],
+            "removed": [],
+            "changed": [],
+        }
+    }
+    record = {"run_id": "x", "db_diff": diff, "blob": b"\x01\xff"}
+    assert json_safe(diff)["items_fts_idx"]["added"] == [[8, "0x"]]
+    row = json.loads(_dumps(record))
+    assert row["blob"] == "0x01ff" and row["db_diff"]["items_fts_idx"]["added"] == [[8, "0x"]]

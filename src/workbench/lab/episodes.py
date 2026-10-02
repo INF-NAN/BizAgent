@@ -216,6 +216,21 @@ _UNAVAILABLE = re.compile(
 )
 
 
+def json_safe(value: Any) -> Any:
+    """Row keys from SQLite can be bytes (BLOB keys, e.g. FTS index tables) or tuples: hex / lists."""
+    if isinstance(value, bytes):
+        return "0x" + value.hex()
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [json_safe(v) for v in value]
+    return value
+
+
+def _dumps(record: dict[str, Any]) -> str:
+    return json.dumps(json_safe(record), ensure_ascii=False, default=str)
+
+
 def llm_unavailable(termination: dict[str, Any] | None) -> bool:
     """True if the episode ended because the model endpoint could not be reached."""
     t = termination or {}
@@ -291,7 +306,7 @@ class EpisodeRunner:
                 record = await self.episode(task, sample)
             async with self._lock:
                 with self.results.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    f.write(_dumps(record) + "\n")
 
         try:
             for attempt in range(RETRY_PASSES + 1):
@@ -449,7 +464,9 @@ class EpisodeRunner:
         )
         verifier = run_dir / "verifier.code.jsonl"
         verifier.write_text(json.dumps(entry, ensure_ascii=False) + "\n", encoding="utf-8")
-        record["db_diff"] = snap.diff(run_dir / "initial.db", run_dir / "work.db").as_dict()["tables"]
+        record["db_diff"] = json_safe(
+            snap.diff(run_dir / "initial.db", run_dir / "work.db").as_dict()["tables"]
+        )
         try:
             summary = await asyncio.to_thread(
                 self.verify_fn,

@@ -70,7 +70,7 @@ class RecordingBackend:
 def save_recording(path: Path, recording: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(recording, f, ensure_ascii=False)
+        json.dump(recording, f, ensure_ascii=False, default=str)
 
 
 def load_recording(path: Path) -> dict[str, Any]:
