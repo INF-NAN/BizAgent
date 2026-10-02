@@ -15,6 +15,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -204,8 +205,21 @@ def lab_settings(
     return base.model_copy(update={"env": env, "gateway": gateway, "agent": agent})
 
 
-# infrastructure failures, not the model's: dropped from results.jsonl and run again on resume
-RETRY_STATUSES = ("env_error", "verify_error")
+# infrastructure failures, not the model's: retried within a run (RETRY_PASSES) and on resume
+RETRY_STATUSES = ("env_error", "verify_error", "llm_unavailable")
+RETRY_PASSES = 2
+# an llm_error whose cause is the network or the endpoint, not the request: connection-pool and
+# connect / read timeouts, a broken connection or proxy, the wall clock, rate limits, 5xx
+_UNAVAILABLE = re.compile(
+    r"^(PoolTimeout|Connect\w*|Read\w*|Write\w*|RemoteProtocolError|LocalProtocolError|ProxyError"
+    r"|NetworkError|TimeoutException|chat exceeded wall-clock|HTTP (429|5\d\d))"
+)
+
+
+def llm_unavailable(termination: dict[str, Any] | None) -> bool:
+    """True if the episode ended because the model endpoint could not be reached."""
+    t = termination or {}
+    return t.get("reason") == "llm_error" and bool(_UNAVAILABLE.match(str(t.get("detail") or "")))
 
 
 def _done_ids(results: Path) -> set[str]:
@@ -266,10 +280,10 @@ class EpisodeRunner:
         self.approver = APPROVERS[cfg.approver]
         self._lock = asyncio.Lock()
 
-    async def run(self, tasks: list[LabTask]) -> Path:
+    async def run(self, tasks: list[LabTask], retry_wait_s: float = 30.0) -> Path:
+        """All episodes not yet in results.jsonl; episodes that failed for infrastructure reasons
+        (RETRY_STATUSES) get up to RETRY_PASSES more passes, the last outcome is kept."""
         self.root.mkdir(parents=True, exist_ok=True)
-        done = _done_ids(self.results)
-        todo = [(t, s) for t in tasks for s in range(self.cfg.samples) if episode_id(t, s) not in done]
         sem = asyncio.Semaphore(self.cfg.concurrency)
 
         async def one(task: LabTask, sample: int) -> None:
@@ -280,7 +294,16 @@ class EpisodeRunner:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
         try:
-            await asyncio.gather(*(one(t, s) for t, s in todo))
+            for attempt in range(RETRY_PASSES + 1):
+                done = _done_ids(self.results)  # drops the lines of episodes to retry
+                todo = [
+                    (t, s) for t in tasks for s in range(self.cfg.samples) if episode_id(t, s) not in done
+                ]
+                if not todo:
+                    break
+                if attempt:
+                    await asyncio.sleep(retry_wait_s)  # a transient outage gets a moment to pass
+                await asyncio.gather(*(one(t, s) for t, s in todo))
         finally:
             await self.rt.aclose()
         return self.results
@@ -323,6 +346,8 @@ class EpisodeRunner:
         recording = self.recorder.pop(run_id)
         save_recording(self.root / "calls" / f"{run_id}.json.gz", recording)
         self._summarise(record, events, approvals, recording)
+        if record["status"] == "ok" and llm_unavailable(record.get("termination")):
+            record["status"] = "llm_unavailable"
         if record["status"] == "ok":
             await self._verify(task, sid, record)
         self.rt.hub.forget(sid)

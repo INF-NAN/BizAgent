@@ -189,7 +189,9 @@ def code_verify(settings: Settings, run_dir: Path, **kw: Any) -> dict[str, Any]:
     return {"reward_type": out["result"]}
 
 
-async def _run(tmp_path: Path, *, inject: bool = False, backend: Any = None) -> list[dict[str, Any]]:
+async def _run(
+    tmp_path: Path, *, inject: bool = False, backend: Any = None, verify_fn: Any = None
+) -> list[dict[str, Any]]:
     lab = tmp_path / "lab"
     tasks = splits.load_tasks(MINI)
     verifiers = splits.load_verifier_index(MINI)
@@ -220,7 +222,7 @@ async def _run(tmp_path: Path, *, inject: bool = False, backend: Any = None) -> 
         splits.read_verifiers(lab),
         env_service=FakeEnvService(runs_dir),
         gateway=gateway,
-        verify_fn=code_verify,
+        verify_fn=verify_fn or code_verify,
         **({"backend": backend} if backend is not None else {}),
     )
     return load_results(path)
@@ -467,3 +469,51 @@ def test_report_process_metrics(tmp_path: Path) -> None:
     m = doc["process"]["base-test"]
     assert m["episodes"] == 4 and m["share_plan_invalid"] == 0.25 and m["tool_errors_per_episode"] == 1
     assert "过程指标" in render(doc)
+
+
+def test_llm_unavailable_is_told_apart_from_model_errors() -> None:
+    from workbench.lab.episodes import llm_unavailable
+
+    for detail in (
+        "PoolTimeout: ",
+        "ConnectError: refused",
+        "ReadTimeout: x",
+        "HTTP 503: busy",
+        "HTTP 429: slow",
+    ):
+        assert llm_unavailable({"reason": "llm_error", "detail": detail}), detail
+    assert not llm_unavailable({"reason": "llm_error", "detail": "HTTP 400: maximum context length"})
+    assert not llm_unavailable({"reason": "max_steps", "detail": "PoolTimeout"})
+    assert not llm_unavailable(None)
+
+
+async def test_infrastructure_failures_are_retried_within_the_run(tmp_path: Path, monkeypatch: Any) -> None:
+    from workbench.lab import episodes
+    from workbench.verify import VerifyError
+
+    calls = {"n": 0}
+
+    def flaky(settings: Settings, run_dir: Path, **kw: Any) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise VerifyError("awm verify did not finish (rc=1)")
+        return code_verify(settings, run_dir, **kw)
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    from workbench.llm.backends.mock_replay import MockReplayBackend
+
+    class Rewinding(MockReplayBackend):
+        """The scripted episode again for every retry."""
+
+        async def chat(self, *a: Any, **kw: Any) -> Any:
+            if self.remaining == 0:
+                self.reset()
+            return await super().chat(*a, **kw)
+
+    monkeypatch.setattr(episodes.asyncio, "sleep", no_wait)
+    backend = Rewinding(FIX / "trajectories" / "demo_query_write_approve.jsonl")
+    rows = await _run(tmp_path, verify_fn=flaky, backend=backend)
+    assert calls["n"] == 2
+    assert len(rows) == 1 and rows[0]["status"] == "ok" and rows[0]["success"] is True

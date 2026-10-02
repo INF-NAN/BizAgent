@@ -57,6 +57,10 @@ if [[ -f /etc/network_turbo ]]; then
   # the proxy is for GitHub / Hugging Face; package indexes (AutoDL's own is a plain-http mirror)
   # are reached directly, or every pip / uv install fails with "no versions found"
   direct="mirrors.aliyun.com,pypi.tuna.tsinghua.edu.cn,mirrors.ustc.edu.cn,pypi.org,files.pythonhosted.org,download.pytorch.org"
+  # the teacher API too: long streamed requests through the proxy exhausted the connection pool
+  # (PoolTimeout on every call after a few episodes), and DeepSeek is reachable directly
+  teacher_host="$(sed -E 's#^[a-z]+://([^/:]+).*#\1#' <<< "${TEACHER_BASE_URL:-https://api.deepseek.com}")"
+  direct="$direct,api.deepseek.com,$teacher_host"
   mirror_host="$(python3 -m pip config get global.index-url 2>/dev/null | sed -E 's#^[a-z]+://([^/:]+).*#\1#' || true)"
   [[ -n "$mirror_host" ]] && direct="$direct,$mirror_host"
   export no_proxy="${no_proxy:+$no_proxy,}$direct,127.0.0.1,localhost"
