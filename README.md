@@ -159,6 +159,7 @@ nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
 ```
 
 - 场景级 train / val / test 划分：test 场景从不出现在训练数据里。
+- verifier 下限：让智能体什么都不做，找出 verifier 误判为成功的任务，比较时另给去掉它们的结果。
 - 4B 基座模型的单次成功率、pass@k 与失败分类。
 - 三种训练数据，训练、选择流程相同，在 test 上配对比较：
   - 教师蒸馏；

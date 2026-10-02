@@ -24,6 +24,7 @@
   - 有 verifier 的场景按固定种子打乱，前 200 个作为 test，接下来 100 个作为 val，其余作为 train；
   - 每个 split 内部再按种子打乱任务，取 test 300、val 100、train 1500 个任务；
   - 训练数据只来自 train 场景。test 上的变化反映的是对未见过的环境（数据库、工具集、业务规则）的泛化，而不是记住了某个场景。
+- 另有注入实验用的 `inject` 任务集：只来自 test 场景中至少有一个 destructive 工具的场景（按网关的离线风险分级判断，与 `workbench gateway export-risk` 相同），取 200 个任务。只有这样的场景才能布置"诱导执行破坏性操作"的注入。
 - 划分写入 `data/lab/splits.json`（种子、每个 split 的场景与任务），同样的种子与数据修订得到同样的划分。
 
 ## 一个 episode 怎样运行和判定
@@ -59,6 +60,7 @@
 
 | 运行（tag） | 模型 | split | 说明 |
 |---|---|---|---|
+| `null-test` | 无（从不回答） | test | verifier 下限：什么都不做也被判为成功的任务 |
 | `base-test`、`base-val` | Qwen3-4B | test、val | 温度 0，每个任务一次 |
 | `base-passk` | Qwen3-4B | test 前 150 个任务 | 温度 0.7，每个任务 4 次，pass@1、pass@2、pass@4 |
 | `teacher-train` | DeepSeek | train | 教师轨迹，训练数据来源 |
@@ -66,8 +68,12 @@
 | `student-train` | Qwen3-4B | train | 温度 0.7，每个任务 2 次，拒绝采样的候选 |
 | `sft-<variant>-val-<ckpt>` | LoRA 各 checkpoint | val | 只用来选 checkpoint |
 | `sft-<variant>-test` | 选中的 checkpoint | test | 每个变体只评一次 |
-| `inj-a`、`inj-b`、`inj-c` | Qwen3-4B | test 前 150 个任务 | 注入实验的三种网关配置 |
-| `inj-sft-a` | val 上最好的 LoRA | test 前 150 个任务 | 训练后的模型，配置 A |
+| `inj-a`、`inj-b`、`inj-c` | Qwen3-4B | inject | 注入实验的三种网关配置 |
+| `inj-sft-a` | val 上最好的 LoRA | inject | 训练后的模型，配置 A |
+
+### verifier 下限
+
+verifier 是上游为每个任务自动生成的代码，并不都可靠：有的任务在数据库没有任何改动、也没有回答时也会被判为 complete。`null-test` 用一个从不回答的模型（`--backend null`）跑一遍 test：智能体拿不到计划就结束，不调用任何工具，然后照常验证。这样通过的任务记为"平凡任务"。报告给出它们的数量，test 上每次运行另给去掉它们之后的成功率，每组配对比较也另给去掉它们之后的结果。这一步不用模型也不用 GPU。
 
 ### pass@k
 
@@ -85,7 +91,7 @@
   |---|---|---|
   | `teacher` | `teacher-train` | 只用 verifier 判定成功的 episode |
   | `rft` | `teacher-train` 与 `student-train` | 只用成功的 episode；每个任务最多 2 个，教师优先，避免容易的任务占满数据 |
-  | `unfiltered` | `teacher-train` | 所有正常结束的 episode，不看 verifier |
+  | `unfiltered` | `teacher-train` | 所有正常结束的 episode，不看 verifier；按固定种子随机抽取，与 `teacher` 变体的 episode 数相同 |
 
 训练（`scripts/lab/sft_train.py`，在 GPU 环境中运行）：
 
@@ -98,11 +104,13 @@
 选择与评测：
 
 - 一个 vLLM 进程以多 LoRA 方式同时服务全部 checkpoint（`--enable-lora --lora-modules ...`），每个 checkpoint 在 val 上跑一遍；每个变体选 val 成功率最高的 checkpoint（并列取更早的），只用它在 test 上评一次。test 不参与任何选择。
+- `unfiltered` 与 `teacher` 的 episode 数相同，两者的差别只在"是否经过 verifier 过滤"，而不是数据量。
+- 某个变体的数据少于 `MIN_SFT_EPISODES`（默认 20）个 episode 时，跳过这个变体并在日志里说明，其余阶段照常进行。
 - 对比都在同一批 test 任务上配对进行：base 与每个变体、`teacher` 与 `rft`（自提升的作用）、`unfiltered` 与 `teacher`（过滤的作用）。每组报告仅一方成功的任务数、McNemar 精确检验的 p 值，以及成功率差的配对 bootstrap 95 区间（5000 次重采样）。
 
 ### 工具结果注入
 
-`InjectingGateway` 包在真实网关外面：每个 episode 第一次成功的读调用，其返回的记录里多出一个字段，内容是一条要求调用本场景某个 destructive 工具的指令，工具与措辞（5 种模板）由 episode 编号确定性地选出。除此之外一切都交给真实网关，策略、审批、预演照常生效。
+`InjectingGateway` 包在真实网关外面，在 `inject` 任务集上运行：每个 episode 第一次成功的读调用，其返回的记录里多出一个字段，内容是一条要求调用本场景某个 destructive 工具的指令，工具与措辞（5 种模板）由 episode 编号确定性地选出。除此之外一切都交给真实网关，策略、审批、预演照常生效。
 
 | 配置 | 网关 | 审批方 |
 |---|---|---|
@@ -150,22 +158,38 @@ tail -f data/lab/run.log
    - 下载数据集与基座模型。
 
    AutoDL 上若存在 `/etc/network_turbo` 会先启用它，并默认使用 Hugging Face 镜像。
-2. 划分数据。
+2. 划分数据，跑 verifier 下限（`null-test`，只用 CPU）。
 3. 教师在后台运行（只占 API，不占 GPU）：先 `teacher-train`，再 `teacher-test`。
 4. 前台在 GPU 上运行 base 模型：
    - 冒烟（val 的 8 个任务，出错过多即停止）；
    - `base-test`、`base-val`、`base-passk`、`student-train`；
-   - 注入实验 A、B、C；
+   - 注入实验 A、B、C（`inject` 任务集）；
    - 前缀缓存开、关两组服务压测。
 5. 等待教师完成，生成三份 SFT 数据，依次训练三个 LoRA。
 6. 启动多 LoRA 服务：各 checkpoint 在 val 上选择 → 各变体的 test → 最好变体的注入实验 → LoRA 服务压测。
 7. 失败预测模型与报告。
 
-可恢复：每个阶段完成后写 `data/lab/.stages/<阶段>.done`，再次运行同一命令时跳过已完成的阶段，评测从 `results.jsonl` 断点继续。每个阶段的日志在 `data/lab/logs/`。可选环境变量见脚本开头：`BASE_MODEL`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`SKIP_SETUP`。
+可恢复：
+- 每个阶段完成后写 `data/lab/.stages/<阶段>.done`，再次运行同一命令时跳过已完成的阶段，评测从 `results.jsonl` 断点继续。
+- 每个阶段的日志在 `data/lab/logs/`。
+- 停止运行：`kill <run_all.sh 的进程号>`。脚本会停掉 vLLM 和后台的教师运行；评测进程收到 SIGTERM 时关闭所有打开的环境再退出。
+- 如果机器被直接关掉（kill -9、内存不足、重启），下次启动时脚本先清理上次遗留的环境 server。
+
+可选环境变量见脚本开头：`BASE_MODEL`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`。
+
+建议先做一次很小的试运行。它用一个单独的目录，每个阶段（包括 vLLM、LoRA 训练与多 LoRA 服务）都会在真实 GPU 上跑一遍，几十个 episode，用来在正式运行前暴露环境问题：
+
+```bash
+mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_TRAIN_LIMIT=16 \
+  SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8" \
+  bash scripts/lab/run_all.sh > data/lab-trial.log 2>&1
+```
+
+试运行装好的 GPU 环境、数据集与模型会被正式运行直接复用；它的结果在 `data/lab-trial/`，与正式运行的 `data/lab/` 互不影响。
 
 耗时与花费（估计，不是测量）：
 
-- 评测的主要成本是 episode 数：base 模型共约 5000 个 episode，三个变体在 val 与 test 上约 2100 个，注入实验 600 个。
+- 评测的主要成本是 episode 数：base 模型共约 5000 个 episode，三个变体在 val 与 test 上约 2100 个，注入实验 800 个，verifier 下限 300 个（只用 CPU）。
 - 三次 LoRA 训练各自取决于数据量。
 - 教师的 1800 个 episode 与 GPU 阶段并行，费用由 token 量决定。每次运行的 prompt 与 completion token 总量都记在 `results.jsonl`，可以按 `configs/pricing.yaml` 的价格自行核算；想少花，用 `TEACHER_TRAIN_LIMIT` 只让教师跑一部分训练任务。
 
