@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# The whole lab run (docs/EXPERIMENTS.md), unattended, on one Linux machine with one CUDA GPU:
+#   DEEPSEEK_API_KEY=... nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
+# Every stage writes data/lab/.stages/<stage>.done when it finishes and is skipped next time, and
+# every evaluation resumes from its results.jsonl, so after an interruption the same command
+# continues where it stopped. Per-stage logs: data/lab/logs/<stage>.log.
+#
+# Settings (environment variables, all optional except DEEPSEEK_API_KEY):
+#   BASE_MODEL=Qwen/Qwen3-4B  TEACHER_MODEL=deepseek-flash  TEACHER_BASE_URL=https://api.deepseek.com
+#   CONC=32 (episodes at once against vLLM)  TEACHER_CONC=16  AWM1K_REVISION=dde80a0283fe...
+#   TEACHER_TRAIN_LIMIT=<n> (teacher on the first n of the 1500 train tasks only, to spend less)
+#   SKIP_SETUP=1 (environments, dataset and model already in place)
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+ROOT="$PWD"
+LAB="$ROOT/data/lab"
+STAGES="$LAB/.stages"
+LOGS="$LAB/logs"
+mkdir -p "$STAGES" "$LOGS"
+
+BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-4B}"
+TEACHER_MODEL="${TEACHER_MODEL:-deepseek-flash}"
+TEACHER_BASE_URL="${TEACHER_BASE_URL:-https://api.deepseek.com}"
+CONC="${CONC:-32}"
+TEACHER_CONC="${TEACHER_CONC:-16}"
+export AWM1K_REVISION="${AWM1K_REVISION:-dde80a0283fe781bdc51656bce57063dc5650213}"
+GPU_VENV="$LAB/.venv-gpu"
+GPY="$GPU_VENV/bin/python"
+MODEL_DIR="$ROOT/data/models/$(basename "$BASE_MODEL")"
+SERVED=qwen3-4b
+PORT=8000
+VLLM_URL="http://127.0.0.1:$PORT/v1"
+VARIANTS=(teacher rft unfiltered)
+
+# AutoDL: its academic proxy for GitHub / Hugging Face, and a Hugging Face mirror
+if [[ -f /etc/network_turbo ]]; then
+  # shellcheck disable=SC1091
+  source /etc/network_turbo || true
+  export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+fi
+export HF_HUB_DISABLE_XET=1
+export HF_HOME="${HF_HOME:-$ROOT/data/hf}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT/data/uv-cache}"
+export UV_LINK_MODE=copy
+# keep bytecode out of the upstream submodules (ADR-001)
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$ROOT/.cache/pycache}"
+export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-WARNING}"
+
+log() { echo "[$(date '+%F %T')] $*"; }
+die() { log "FAILED: $*"; exit 1; }
+
+# stage <name> <command...>: run once; output to logs/<name>.log
+stage() {
+  local name="$1"; shift
+  if [[ -f "$STAGES/$name.done" ]]; then log "skip $name (done)"; return 0; fi
+  log "start $name"
+  local t0=$SECONDS
+  if "$@" >> "$LOGS/$name.log" 2>&1; then
+    touch "$STAGES/$name.done"
+    log "done  $name ($(( (SECONDS - t0) / 60 )) min)"
+  else
+    log "error in $name, last lines of $LOGS/$name.log:"
+    tail -n 40 "$LOGS/$name.log" || true
+    die "$name"
+  fi
+}
+
+VLLM_PID=""
+TEACHER_PID=""
+stop_vllm() {
+  if [[ -n "$VLLM_PID" ]] && kill -0 "$VLLM_PID" 2>/dev/null; then
+    kill -TERM -- "-$VLLM_PID" 2>/dev/null || kill -TERM "$VLLM_PID" 2>/dev/null || true
+    for _ in $(seq 1 60); do kill -0 "$VLLM_PID" 2>/dev/null || break; sleep 1; done
+    kill -KILL -- "-$VLLM_PID" 2>/dev/null || true
+  fi
+  VLLM_PID=""
+  # the GPU must be free before the next server or the training starts
+  for _ in $(seq 1 60); do
+    [[ -z "$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null)" ]] && break
+    sleep 2
+  done
+}
+cleanup() {
+  stop_vllm
+  if [[ -n "$TEACHER_PID" ]] && kill -0 "$TEACHER_PID" 2>/dev/null; then
+    kill -TERM -- "-$TEACHER_PID" 2>/dev/null || kill -TERM "$TEACHER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+# start_vllm <log name> <extra vllm args...>
+start_vllm() {
+  local name="$1"; shift
+  stop_vllm
+  log "vllm up ($name)"
+  setsid "$GPU_VENV/bin/vllm" serve "$MODEL_DIR" \
+    --served-model-name "$SERVED" --host 127.0.0.1 --port "$PORT" \
+    --max-model-len 40960 --gpu-memory-utilization 0.90 --max-num-seqs 64 \
+    --enable-auto-tool-choice --tool-call-parser hermes \
+    "$@" >> "$LOGS/vllm-$name.log" 2>&1 &
+  VLLM_PID=$!
+  for _ in $(seq 1 180); do
+    if curl -sf "$VLLM_URL/models" > /dev/null; then log "vllm ready ($name)"; return 0; fi
+    kill -0 "$VLLM_PID" 2>/dev/null || { tail -n 40 "$LOGS/vllm-$name.log"; die "vllm ($name) exited"; }
+    sleep 5
+  done
+  tail -n 40 "$LOGS/vllm-$name.log"
+  die "vllm ($name) not ready after 15 min"
+}
+
+wb() { uv run --frozen workbench "$@"; }
+
+# eval_vllm <tag> <split> <model name> [extra lab eval args...]
+eval_vllm() {
+  local tag="$1" split="$2" model="$3"; shift 3
+  wb lab eval --split "$split" --tag "$tag" --backend vllm --base-url "$VLLM_URL" --model "$model" \
+    --no-thinking --concurrency "$CONC" --port-min 20000 --min-ok 0.5 "$@"
+}
+
+# ---------------------------------------------------------------------------- checks and setup
+log "lab run in $ROOT"
+command -v nvidia-smi > /dev/null || die "nvidia-smi not found: a CUDA GPU is required"
+[[ -n "${DEEPSEEK_API_KEY:-}" ]] || die "export DEEPSEEK_API_KEY first (the teacher model)"
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+free_gb=$(df -Pk "$ROOT" | awk 'NR==2 {print int($4/1024/1024)}')
+log "free disk: ${free_gb} GB"
+(( free_gb >= ${MIN_FREE_GB:-60} )) || die "less than ${MIN_FREE_GB:-60} GB free on $ROOT (models, two Python envs and the runs need it)"
+command -v uv > /dev/null || { python3 -m pip install -q uv && export PATH="$HOME/.local/bin:$PATH"; }
+command -v uv > /dev/null || die "uv not found and could not be installed"
+
+setup_app() {
+  git submodule update --init --depth 1 third_party/agent-world-model
+  uv sync --frozen
+}
+setup_gpu() {
+  [[ -x "$GPY" ]] || uv venv "$GPU_VENV" --python 3.12
+  VIRTUAL_ENV="$GPU_VENV" uv pip install -r scripts/lab/gpu-requirements.txt
+  "$GPY" -c "import torch, vllm, peft, sklearn; assert torch.cuda.is_available(); print(torch.__version__, vllm.__version__, torch.cuda.get_device_name(0))"
+}
+get_data() {
+  [[ -f data/awm1k/gen_verifier.pure_code.jsonl ]] || bash scripts/download_data.sh
+}
+get_model() {
+  "$GPU_VENV/bin/hf" download "$BASE_MODEL" --local-dir "$MODEL_DIR" \
+    --exclude "*.pth" --exclude "original/*"
+}
+if [[ "${SKIP_SETUP:-0}" != 1 ]]; then
+  stage setup-app setup_app
+  stage setup-gpu setup_gpu
+  stage data get_data
+  stage model get_model
+fi
+stage split wb lab split
+
+# -------------------------------------------- teacher episodes: API only, runs in the background
+teacher() {
+  local common=(--backend openai_compat --base-url "$TEACHER_BASE_URL" --model "$TEACHER_MODEL"
+    --api-key-env DEEPSEEK_API_KEY --max-tokens 8192 --concurrency "$TEACHER_CONC" --port-min 40000)
+  if [[ ! -f "$STAGES/teacher-train.done" ]]; then
+    wb lab eval --split train --tag teacher-train "${common[@]}" ${TEACHER_TRAIN_LIMIT:+--limit "$TEACHER_TRAIN_LIMIT"} \
+      --min-ok 0.5 && touch "$STAGES/teacher-train.done"
+  fi
+  if [[ ! -f "$STAGES/teacher-test.done" ]]; then
+    wb lab eval --split test --tag teacher-test "${common[@]}" --min-ok 0.5 && touch "$STAGES/teacher-test.done"
+  fi
+}
+if [[ ! -f "$STAGES/teacher-test.done" ]]; then
+  log "teacher episodes start in the background (log: $LOGS/teacher.log)"
+  setsid bash -c "$(declare -f wb teacher); STAGES='$STAGES' TEACHER_BASE_URL='$TEACHER_BASE_URL' \
+    TEACHER_MODEL='$TEACHER_MODEL' TEACHER_CONC='$TEACHER_CONC' \
+    TEACHER_TRAIN_LIMIT='${TEACHER_TRAIN_LIMIT:-}'; teacher" >> "$LOGS/teacher.log" 2>&1 &
+  TEACHER_PID=$!
+fi
+
+# ----------------------------------------------------------------- base model: GPU, foreground
+start_vllm base
+stage smoke eval_vllm smoke val "$SERVED" --limit 8 --min-ok 0.5
+stage base-test eval_vllm base-test test "$SERVED"
+stage base-val eval_vllm base-val val "$SERVED"
+stage base-passk eval_vllm base-passk test "$SERVED" --limit 150 --samples 4 --temperature 0.7
+stage student-train eval_vllm student-train train "$SERVED" --samples 2 --temperature 0.7
+stage inj-a eval_vllm inj-a test "$SERVED" --limit 150 --inject --approver auto
+stage inj-b eval_vllm inj-b test "$SERVED" --limit 150 --inject --approver auto \
+  --policy-file configs/lab/deny_destructive.yaml
+stage inj-c eval_vllm inj-c test "$SERVED" --limit 150 --inject --approver preview-guard
+stage bench-prefix-on wb lab bench --label base-prefix-cache-on --model "$SERVED" --base-url "$VLLM_URL"
+start_vllm base-no-prefix --no-enable-prefix-caching
+stage bench-prefix-off wb lab bench --label base-prefix-cache-off --model "$SERVED" --base-url "$VLLM_URL"
+stop_vllm
+
+# ------------------------------------------------------------------------------ wait for teacher
+if [[ -n "$TEACHER_PID" ]]; then
+  log "waiting for the teacher episodes"
+  wait "$TEACHER_PID" || true
+  TEACHER_PID=""
+fi
+[[ -f "$STAGES/teacher-train.done" && -f "$STAGES/teacher-test.done" ]] || {
+  tail -n 40 "$LOGS/teacher.log"; die "teacher episodes did not finish (rerun the script to resume them)"; }
+
+# ---------------------------------------------------------------------------------- SFT variants
+stage sft-data-teacher wb lab sft-data --run teacher-train --out "$LAB/sft/teacher/train.jsonl"
+stage sft-data-rft wb lab sft-data --run teacher-train --run student-train --max-per-task 2 \
+  --out "$LAB/sft/rft/train.jsonl"
+stage sft-data-unfiltered wb lab sft-data --run teacher-train --include-failed \
+  --out "$LAB/sft/unfiltered/train.jsonl"
+for v in "${VARIANTS[@]}"; do
+  stage "train-$v" "$GPY" scripts/lab/sft_train.py --data "$LAB/sft/$v/train.jsonl" \
+    --model "$MODEL_DIR" --out "$LAB/sft/$v/adapters"
+done
+
+# --------------------------------------------- checkpoint selection on val, then test, one server
+lora_args=()
+for v in "${VARIANTS[@]}"; do
+  for ck in "$LAB/sft/$v/adapters"/ckpt-*; do lora_args+=("$v-$(basename "$ck")=$ck"); done
+done
+start_vllm lora --enable-lora --max-lora-rank 64 --max-loras 2 --max-cpu-loras 16 \
+  --lora-modules "${lora_args[@]}"
+for v in "${VARIANTS[@]}"; do
+  for ck in "$LAB/sft/$v/adapters"/ckpt-*; do
+    c="$(basename "$ck")"
+    stage "sft-$v-val-$c" eval_vllm "sft-$v-val-$c" val "$v-$c"
+  done
+  stage "select-$v" wb lab select --variant "$v"
+  best="$(uv run --frozen python -c "import json; print(json.load(open('$LAB/sft/$v/selected.json'))['checkpoint'])")"
+  stage "sft-$v-test" eval_vllm "sft-$v-test" test "$v-$best"
+done
+# the variant with the best val score (selection never looks at test)
+best_model="$(uv run --frozen python - "$LAB" "${VARIANTS[@]}" <<'PY'
+import json, sys
+lab, variants = sys.argv[1], sys.argv[2:]
+sel = {v: json.load(open(f"{lab}/sft/{v}/selected.json")) for v in variants}
+v = max(variants, key=lambda v: (sel[v]["val_rate"], -variants.index(v)))
+print(f"{v}-{sel[v]['checkpoint']}")
+PY
+)"
+log "best adapter on val: $best_model"
+stage inj-sft-a eval_vllm inj-sft-a test "$best_model" --limit 150 --inject --approver auto
+stage bench-lora wb lab bench --label lora-adapter --model "$best_model" --base-url "$VLLM_URL"
+stage bench-lora-base wb lab bench --label base-on-lora-server --model "$SERVED" --base-url "$VLLM_URL"
+stop_vllm
+
+# ------------------------------------------------------------------------- analysis and report
+mkdir -p "$LAB/risk"
+stage risk "$GPY" scripts/lab/risk_model.py --lab-dir "$LAB" --out "$LAB/risk/risk.json" \
+  --tags base-test base-val base-passk student-train teacher-train teacher-test \
+  sft-teacher-test sft-rft-test sft-unfiltered-test
+wb lab report
+log "all stages finished: $LAB/REPORT.md"
