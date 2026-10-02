@@ -2,10 +2,16 @@
 
 Each sample is rendered with the model's own chat template and the same tools, exactly as the
 serving engine renders a request. Loss is on assistant turns only: the tokens after
-``<|im_start|>assistant\\n`` up to and including ``<|im_end|>``. Thinking is off at serving time,
-where every generation starts after an empty ``<think>\\n\\n</think>\\n\\n`` block; the template
-writes that block only for the last turn, so it is inserted (without loss) before every earlier
-assistant turn too, and each turn is learnt right after the text that precedes it when served.
+``<|im_start|>assistant\\n`` up to and including ``<|im_end|>``.
+
+For a template without thinking (Qwen3-*-Instruct-2507, the default model) every request the
+model is served is an exact prefix of the rendered conversation, so each turn is learnt after
+exactly the text it follows when served. A hybrid template (Qwen3-4B with thinking off) starts
+every generation after an empty ``<think>\\n\\n</think>\\n\\n`` block but writes it only for the
+last turn; it is then inserted (without loss) before every earlier assistant turn. Before
+training, the script renders the served prompt of every assistant turn of the first samples and
+counts the turns whose prompt is not a prefix of the training text (``template_check`` in
+train_meta.json): 0 for the default model.
 Logits are computed only where a loss is taken (``logits_to_keep`` with indices).
 Adapters are saved every ``--save-every`` epochs (fractions allowed) under ``<out>/ckpt-<k>``.
 
@@ -51,8 +57,17 @@ def prepare(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def render(tok: Any, sample: dict[str, Any]) -> tuple[str, list[tuple[int, int]]]:
-    """Template text with an empty think block before every assistant turn, and the trained spans."""
+def thinking_prefix(tok: Any) -> bool:
+    """True if served generations start after an empty think block (hybrid templates)."""
+    prompt = tok.apply_chat_template(
+        [{"role": "user", "content": "x"}], tokenize=False, add_generation_prompt=True, enable_thinking=False
+    )
+    return bool(prompt.endswith(EMPTY_THINK))
+
+
+def render(tok: Any, sample: dict[str, Any], think: bool) -> tuple[str, list[tuple[int, int]]]:
+    """Template text (with an empty think block before every assistant turn if ``think``) and the
+    character spans that are trained."""
     text = tok.apply_chat_template(
         prepare(sample["messages"]),
         tools=sample.get("tools") or None,
@@ -65,11 +80,10 @@ def render(tok: Any, sample: dict[str, Any]) -> tuple[str, list[tuple[int, int]]
     spans = []
     for part in parts[1:]:
         rebuilt += ASSISTANT
-        if not part.startswith("<think>"):
+        if think and not part.startswith("<think>"):
             part = EMPTY_THINK + part
-        body_start = len(rebuilt) + (
-            part.index("</think>") + len("</think>\n\n") if part.startswith("<think>") else 0
-        )
+        skip = part.index("</think>") + len("</think>\n\n") if part.startswith("<think>") else 0
+        body_start = len(rebuilt) + skip
         end = part.find(END)
         rebuilt += part
         if end >= 0:
@@ -77,8 +91,31 @@ def render(tok: Any, sample: dict[str, Any]) -> tuple[str, list[tuple[int, int]]
     return rebuilt, spans
 
 
-def encode(tok: Any, sample: dict[str, Any], max_len: int) -> dict[str, Any] | None:
-    text, spans = render(tok, sample)
+def template_check(tok: Any, samples: list[dict[str, Any]], think: bool) -> dict[str, int]:
+    """Assistant turns whose served prompt is / is not a prefix of the training text."""
+    ok = bad = 0
+    for sample in samples:
+        text, _ = render(tok, sample, think)
+        msgs = prepare(sample["messages"])
+        for i, m in enumerate(msgs):
+            if m["role"] != "assistant":
+                continue
+            served = tok.apply_chat_template(
+                msgs[:i],
+                tools=sample.get("tools") or None,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            if text.startswith(served):
+                ok += 1
+            else:
+                bad += 1
+    return {"turns_checked": ok + bad, "prompt_not_prefix": bad}
+
+
+def encode(tok: Any, sample: dict[str, Any], max_len: int, think: bool) -> dict[str, Any] | None:
+    text, spans = render(tok, sample, think)
     enc = tok(text, add_special_tokens=False, return_offsets_mapping=True)
     ids = enc["input_ids"]
     if len(ids) > max_len:
@@ -102,7 +139,7 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--warmup", type=float, default=0.03)
     ap.add_argument("--batch", type=int, default=16, help="sequences per optimizer step")
-    ap.add_argument("--max-len", type=int, default=24576)
+    ap.add_argument("--max-len", type=int, default=32768)
     ap.add_argument("--rank", type=int, default=64)
     ap.add_argument("--alpha", type=int, default=128)
     ap.add_argument("--dropout", type=float, default=0.05)
@@ -117,9 +154,12 @@ def main() -> None:
     samples = [
         json.loads(line) for line in args.data.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+    think = thinking_prefix(tok)
+    check = template_check(tok, samples[:20], think)
+    print(f"template: empty think block inserted={think}; {check}", flush=True)
     data, too_long = [], 0
     for s in samples:
-        enc = encode(tok, s, args.max_len)
+        enc = encode(tok, s, args.max_len, think)
         if enc is None:
             too_long += 1
         else:
@@ -198,6 +238,8 @@ def main() -> None:
     meta = {
         "samples": len(data),
         "dropped_too_long": too_long,
+        "think_block_inserted": think,
+        "template_check": check,
         "tokens": total_tokens,
         "trained_tokens": trained_tokens,
         "steps": total_steps,

@@ -6,7 +6,10 @@
 # continues where it stopped. Per-stage logs: data/lab/logs/<stage>.log.
 #
 # Settings (environment variables, all optional except DEEPSEEK_API_KEY):
-#   BASE_MODEL=Qwen/Qwen3-4B  TEACHER_MODEL=deepseek-flash  TEACHER_BASE_URL=https://api.deepseek.com
+#   BASE_MODEL=Qwen/Qwen3-4B-Instruct-2507  MAX_MODEL_LEN=65536
+#   TEACHER_MODEL=deepseek-flash  TEACHER_BASE_URL=https://api.deepseek.com
+#   TEACHER_MIN_SUCCESS=600 (fewer solved train tasks: the teacher also runs the reserve train tasks)
+#   TEACHER_TEST_LIMIT=300 (the teacher's reference run on test)
 #   CONC=32 (episodes at once against vLLM)  TEACHER_CONC=16  AWM1K_REVISION=dde80a0283fe...
 #   TEACHER_TRAIN_LIMIT=<n> (teacher on the first n of the 1500 train tasks only, to spend less)
 #   SKIP_SETUP=1 (environments, dataset and model already in place)
@@ -23,7 +26,7 @@ STAGES="$LAB/.stages"
 LOGS="$LAB/logs"
 mkdir -p "$STAGES" "$LOGS"
 
-BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-4B}"
+BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-4B-Instruct-2507}"
 TEACHER_MODEL="${TEACHER_MODEL:-deepseek-flash}"
 TEACHER_BASE_URL="${TEACHER_BASE_URL:-https://api.deepseek.com}"
 CONC="${CONC:-32}"
@@ -32,11 +35,14 @@ export AWM1K_REVISION="${AWM1K_REVISION:-dde80a0283fe781bdc51656bce57063dc565021
 GPU_VENV="${GPU_VENV:-$ROOT/data/lab/.venv-gpu}"  # shared by trial and full runs
 GPY="$GPU_VENV/bin/python"
 MODEL_DIR="$ROOT/data/models/$(basename "$BASE_MODEL")"
-SERVED=qwen3-4b
+SERVED=base
 PORT=8000
 VLLM_URL="http://127.0.0.1:$PORT/v1"
 VARIANTS=(teacher rft unfiltered)
 MIN_SFT_EPISODES="${MIN_SFT_EPISODES:-20}"
+TEACHER_MIN_SUCCESS="${TEACHER_MIN_SUCCESS:-600}"
+TEACHER_TEST_LIMIT="${TEACHER_TEST_LIMIT:-300}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 
 # AutoDL: its academic proxy for GitHub / Hugging Face, and a Hugging Face mirror
 if [[ -f /etc/network_turbo ]]; then
@@ -117,7 +123,7 @@ start_vllm() {
   log "vllm up ($name)"
   setsid "$GPU_VENV/bin/vllm" serve "$MODEL_DIR" \
     --served-model-name "$SERVED" --host 127.0.0.1 --port "$PORT" \
-    --max-model-len 40960 --gpu-memory-utilization 0.90 --max-num-seqs 64 \
+    --max-model-len "$MAX_MODEL_LEN" --gpu-memory-utilization 0.90 --max-num-seqs 64 \
     --enable-auto-tool-choice --tool-call-parser hermes \
     "$@" >> "$LOGS/vllm-$name.log" 2>&1 &
   VLLM_PID=$!
@@ -131,6 +137,9 @@ start_vllm() {
 }
 
 wb() { uv run --frozen workbench "$@"; }
+count_success() { uv run --frozen python -c "import json, sys
+try: print(sum(1 for l in open(sys.argv[1]) if l.strip() and json.loads(l).get('success')))
+except FileNotFoundError: print(0)" "$1"; }
 # jget <json file> <key>: one top-level value, empty if the file or key is missing
 jget() { uv run --frozen python -c "import json,sys
 try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ''))
@@ -191,23 +200,40 @@ teacher() {
     --api-key-env DEEPSEEK_API_KEY --max-tokens 8192 --concurrency "$TEACHER_CONC" --port-min 40000)
   if [[ ! -f "$STAGES/teacher-train.done" ]]; then
     wb lab eval --split train --tag teacher-train "${common[@]}" ${TEACHER_TRAIN_LIMIT:+--limit "$TEACHER_TRAIN_LIMIT"} \
-      --min-ok 0.5 && touch "$STAGES/teacher-train.done"
+      --min-ok 0.5 || return 1
+    touch "$STAGES/teacher-train.done"
+  fi
+  # too few solved train tasks: the teacher also runs the reserve train tasks
+  if [[ ! -f "$STAGES/teacher-train-extra.done" ]]; then
+    local solved
+    solved="$(count_success "$LAB/runs/teacher-train/results.jsonl")"
+    if (( solved < TEACHER_MIN_SUCCESS )); then
+      echo "teacher solved $solved train tasks (< TEACHER_MIN_SUCCESS=$TEACHER_MIN_SUCCESS): reserve tasks too"
+      wb lab eval --split train_extra --tag teacher-train-extra "${common[@]}" --min-ok 0.5 || return 1
+    fi
+    touch "$STAGES/teacher-train-extra.done"
   fi
   if [[ ! -f "$STAGES/teacher-test.done" ]]; then
-    wb lab eval --split test --tag teacher-test "${common[@]}" --min-ok 0.5 && touch "$STAGES/teacher-test.done"
+    # the teacher is a reference on test, not a result: the first TEACHER_TEST_LIMIT tasks
+    wb lab eval --split test --tag teacher-test "${common[@]}" --limit "$TEACHER_TEST_LIMIT" --min-ok 0.5 || return 1
+    touch "$STAGES/teacher-test.done"
   fi
 }
 if [[ ! -f "$STAGES/teacher-test.done" ]]; then
   log "teacher episodes start in the background (log: $LOGS/teacher.log)"
-  setsid bash -c "$(declare -f wb teacher); STAGES='$STAGES' TEACHER_BASE_URL='$TEACHER_BASE_URL' \
-    TEACHER_MODEL='$TEACHER_MODEL' TEACHER_CONC='$TEACHER_CONC' \
-    TEACHER_TRAIN_LIMIT='${TEACHER_TRAIN_LIMIT:-}'; teacher" >> "$LOGS/teacher.log" 2>&1 &
+  setsid bash -c "$(declare -f wb count_success teacher); STAGES='$STAGES' LAB='$LAB' \
+    TEACHER_BASE_URL='$TEACHER_BASE_URL' TEACHER_MODEL='$TEACHER_MODEL' TEACHER_CONC='$TEACHER_CONC' \
+    TEACHER_TRAIN_LIMIT='${TEACHER_TRAIN_LIMIT:-}' TEACHER_MIN_SUCCESS='$TEACHER_MIN_SUCCESS' \
+    TEACHER_TEST_LIMIT='$TEACHER_TEST_LIMIT'; teacher" >> "$LOGS/teacher.log" 2>&1 &
   TEACHER_PID=$!
 fi
 
-# the verifier's floor: an agent that never answers (CPU only, no model)
-stage null-test wb lab eval --split test --tag null-test --backend null --concurrency "$CONC" \
-  --port-min 20000 --min-ok 0.5
+# the verifier's floor: an agent that never answers (CPU only, no model). Test: reported; val:
+# checkpoint selection ignores those tasks; train: their "successes" are not training data.
+for s in test val train; do
+  stage "null-$s" wb lab eval --split "$s" --tag "null-$s" --backend null --concurrency "$CONC" \
+    --port-min 20000 --min-ok 0.5
+done
 
 # ----------------------------------------------------------------- base model: GPU, foreground
 start_vllm base
@@ -235,12 +261,21 @@ fi
   tail -n 40 "$LOGS/teacher.log"; die "teacher episodes did not finish (rerun the script to resume them)"; }
 
 # ---------------------------------------------------------------------------------- SFT variants
-stage sft-data-teacher wb lab sft-data --run teacher-train --out "$LAB/sft/teacher/train.jsonl"
-stage sft-data-rft wb lab sft-data --run teacher-train --run student-train --max-per-task 2 \
-  --out "$LAB/sft/rft/train.jsonl"
+# reserve-task teacher episodes need their own null-agent run to find their trivial tasks
+if [[ -d "$LAB/runs/teacher-train-extra" ]]; then
+  stage null-train_extra wb lab eval --split train_extra --tag null-train_extra --backend null \
+    --concurrency "$CONC" --port-min 20000 --min-ok 0.5
+fi
+TEACHER_RUNS=(--run teacher-train --run teacher-train-extra)
+NOT_TRIVIAL=(--exclude-trivial null-train --exclude-trivial null-train_extra)
+stage sft-data-teacher wb lab sft-data "${TEACHER_RUNS[@]}" "${NOT_TRIVIAL[@]}" \
+  --out "$LAB/sft/teacher/train.jsonl"
+stage sft-data-rft wb lab sft-data "${TEACHER_RUNS[@]}" --run student-train "${NOT_TRIVIAL[@]}" \
+  --max-per-task 2 --out "$LAB/sft/rft/train.jsonl"
 # as many episodes as the teacher variant: the ablation changes only whether they were verified
-stage sft-data-unfiltered wb lab sft-data --run teacher-train --include-failed \
+stage sft-data-unfiltered wb lab sft-data "${TEACHER_RUNS[@]}" "${NOT_TRIVIAL[@]}" --include-failed \
   --match "$LAB/sft/teacher/train.stats.json" --out "$LAB/sft/unfiltered/train.jsonl"
+
 # a variant with too few episodes is skipped (and said so) rather than stopping the whole run
 TRAINED=()
 for v in "${VARIANTS[@]}"; do
@@ -292,7 +327,7 @@ fi
 # ------------------------------------------------------------------------- analysis and report
 mkdir -p "$LAB/risk"
 stage risk "$GPY" scripts/lab/risk_model.py --lab-dir "$LAB" --out "$LAB/risk/risk.json" \
-  --tags base-test base-val base-passk student-train teacher-train teacher-test \
+  --tags base-test base-val base-passk student-train teacher-train teacher-train-extra teacher-test \
   sft-teacher-test sft-rft-test sft-unfiltered-test
 wb lab report
 log "all stages finished: $LAB/REPORT.md"
