@@ -54,6 +54,13 @@ if [[ -f /etc/network_turbo ]]; then
   # shellcheck disable=SC1091
   source /etc/network_turbo || true
   export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+  # the proxy is for GitHub / Hugging Face; package indexes (AutoDL's own is a plain-http mirror)
+  # are reached directly, or every pip / uv install fails with "no versions found"
+  direct="mirrors.aliyun.com,pypi.tuna.tsinghua.edu.cn,mirrors.ustc.edu.cn,pypi.org,files.pythonhosted.org,download.pytorch.org"
+  mirror_host="$(python3 -m pip config get global.index-url 2>/dev/null | sed -E 's#^[a-z]+://([^/:]+).*#\1#' || true)"
+  [[ -n "$mirror_host" ]] && direct="$direct,$mirror_host"
+  export no_proxy="${no_proxy:+$no_proxy,}$direct,127.0.0.1,localhost"
+  export NO_PROXY="$no_proxy"
 fi
 export HF_HUB_DISABLE_XET=1
 export HF_HOME="${HF_HOME:-$ROOT/data/hf}"
@@ -213,7 +220,11 @@ setup_gpu() {
   # a pip mirror configured on the machine (AutoDL has one) also serves this install
   local mirror
   mirror="$(python3 -m pip config get global.index-url 2>/dev/null || true)"
-  if [[ -n "$mirror" && -z "${UV_DEFAULT_INDEX:-}" ]]; then export UV_DEFAULT_INDEX="$mirror"; fi
+  if [[ -n "$mirror" && -z "${UV_DEFAULT_INDEX:-}" ]]; then
+    export UV_DEFAULT_INDEX="$mirror"
+    # AutoDL's mirror is plain http; uv needs it named as an allowed insecure host
+    case "$mirror" in http://*) export UV_INSECURE_HOST="$(sed -E 's#^http://([^/:]+).*#\1#' <<< "$mirror")";; esac
+  fi
   # --no-config: the app's [tool.uv] constraints (numpy==2.4.2 for AWM) must not apply here;
   # vLLM 0.19.0 needs numba 0.61.2, hence numpy<2.3
   VIRTUAL_ENV="$GPU_VENV" uv pip install --no-config -r scripts/lab/gpu-requirements.txt
