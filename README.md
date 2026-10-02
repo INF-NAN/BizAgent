@@ -7,7 +7,8 @@
 > It runs an isolated AWM MCP environment per session and routes every tool call through a deny-first MCP gateway: ordered approval rules decide each call, the shipped default auto-approves nothing, and a write that needs a person is first previewed in a throwaway shadow environment, then approved with a one-time token and audited.
 > A LangGraph agent, an HTTP/SSE API and a small web UI drive the environments; the repo also orchestrates AWM's synthesis pipeline and launches smoke-only training in a separate environment.
 > Everything runs on CPU with a scripted mock LLM; OpenAI-compatible endpoints and vLLM plug in through configuration.
-> The repository produces no model performance numbers: paper numbers live only in `results/registry.yaml`, and the application layer is not benchmarked.
+> A batch lab (`workbench lab`, one script on one GPU) runs the whole stack on official tasks with scenario-level splits and the official code verifiers: base-model evaluation, teacher distillation vs. verifier-filtered rejection sampling, tool-output injection against three gateway configurations, serving benchmarks on recorded agent traffic, and a verifier-free failure predictor.
+> The repository commits no model performance numbers: paper numbers live only in `results/registry.yaml`, and lab results stay in the generated, uncommitted `data/lab/REPORT.md`.
 
 把 AWM 的合成 MCP 环境组织成一个可部署、可审计、可演示的企业智能体工作台：环境隔离、工具治理、智能体、API 与 UI、合成与训练的工程化封装。
 
@@ -23,6 +24,7 @@
 - HTTP/SSE API 与 Web UI：会话、对话、审批卡片、时间线、DB diff 与 AWM 轨迹查看器；网关同时作为 MCP server 对外提供。
 - 合成流水线编排：编排 `awm gen` 各步骤，带 checkpoint 续跑、LLM 本地代理（缓存、重试、账本）、预算熔断、中断回收与校验报告。
 - 训练启动器：preflight 与 smoke 训练在独立的 train 环境中以子进程运行，训练进程只拿白名单环境变量，产物标记 `NO_RESULTS`。
+- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练及其消融、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）。
 
 ## 截图
 
@@ -147,6 +149,27 @@ uv run workbench doctor        # llm 一项检查端点是否可达
 
 vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`、`workbench serve probe`、`docker compose --profile gpu up`）与 smoke 训练见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
+## 批量实验
+
+`workbench lab` 把整条链路放到官方任务上批量运行，每个 episode 用官方 pure-code verifier 判定。一台单卡机器上一条命令跑完全部实验（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）：
+
+```bash
+export DEEPSEEK_API_KEY=...
+nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
+```
+
+- 场景级 train / val / test 划分：test 场景从不出现在训练数据里。
+- 4B 基座模型的单次成功率、pass@k 与失败分类。
+- 三种训练数据，训练、选择流程相同，在 test 上配对比较：
+  - 教师蒸馏；
+  - 加入学生自身成功轨迹的拒绝采样；
+  - 不经 verifier 过滤的消融。
+- 工具结果注入：三种网关配置，以及训练前后的模型对比。
+- 用录制的真实智能体请求压测 vLLM：前缀缓存与多 LoRA 服务。
+- 不运行 verifier、只凭运行时信号的失败预测（按场景分组交叉验证）。
+
+阶段可断点续跑，最后生成 `data/lab/REPORT.md`。
+
 ## 项目结构
 
 ```text
@@ -161,6 +184,7 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 │   ├── synth/           # 合成编排：checkpoint、LLM 代理、账本、预算熔断、校验
 │   ├── train/           # 训练 profile 约束、preflight、launch
 │   ├── results/         # 论文数字 registry、RESULTS.md 生成、数字守卫
+│   ├── lab/             # 批量实验：划分、运行与验证、录制、注入、SFT 数据、服务压测、统计与报告
 │   ├── cli.py           # `workbench` 命令行
 │   ├── config.py        # 配置（configs/app.yaml + 环境变量）
 │   ├── doctor.py        # 环境自检
@@ -168,13 +192,13 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 │   ├── subprocess_env.py# 子进程与训练进程的环境变量白名单
 │   └── verify.py        # `workbench verify`
 ├── ui/                  # 静态 Web UI，无构建步骤
-├── configs/             # 应用配置、工具与审批策略、serving profile、价格表、训练 profile
-├── scripts/             # 数据下载、vLLM 启动、Docker 冒烟、UI 自检、链接检查、预演计时、日志脱敏
+├── configs/             # 应用配置、工具与审批策略、serving profile、价格表、训练 profile、实验策略
+├── scripts/             # 数据下载、vLLM 启动、Docker 冒烟、UI 自检、链接检查、预演计时、日志脱敏；lab/ 为批量实验
 ├── tests/               # 单元与集成测试；fixtures/ 为手写迷你场景与 mock 脚本
 ├── results/registry.yaml# 论文数字的唯一来源
 ├── train/               # 独立的 train 环境（pyproject + uv.lock）
 ├── third_party/         # AWM 与 AgentFly 子模块（固定 SHA，只读）
-├── docs/                # 架构、决策记录、上游、学习路线、部署、示例、截图
+├── docs/                # 架构、决策记录、上游、学习路线、部署、实验、示例、截图
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -199,7 +223,7 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 
 ## 设计边界
 
-- 应用层不评测模型能力。被评测对象（Arctic-AWM、AgentWorldModel-1K 与官方评测 harness）都来自上游，小规模的自建任务不足以支撑效果结论。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 拦截 README 与 docs 中未登记的性能类数字和应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
+- 应用层功能（网关、审批、守卫）不做效果统计，小规模的自建任务不足以支撑效果结论。官方任务上的批量实验有单独的设计（场景级划分、官方 verifier 判定、配对比较，ADR-028），结果写到不入库的 `data/lab/REPORT.md`。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 拦截 README 与 docs 中未登记的性能类数字和应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
 - AWM 没有许可证，本仓库只以 submodule 指针引用它，不复制、不打补丁。Docker 镜像内含 AWM 代码，所以只在本地和 CI 构建，不推送到镜像仓库（ADR-003）。
 - 训练只提供 smoke 配置。上游公开了环境适配，没有公开完整的训练配方，所以 smoke 只演示 AgentFly 自带的"rollout → 奖励 → 更新"链路，使用 `calculator` 工具与数学奖励，不接触 AWM 环境，模型不超过 1.7B、LoRA、不超过 5 step，产物标记 `NO_RESULTS`（ADR-012）。
 - 自合成的环境只放在 `data/synth/`，manifest 标记 `origin: local-synth`，不与官方数据混合，也不用于训练（ADR-011）。

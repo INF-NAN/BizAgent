@@ -163,6 +163,8 @@
 
 ## ADR-013 不做效果评测
 
+> 适用范围：工作台的应用层功能（网关、审批、守卫、API）。官方任务上的批量实验另有设计，见 ADR-028。
+
 - 背景：本仓库处理模型的使用、部署、管理与观察。被评测的对象，即 Arctic-AWM 模型、AgentWorldModel-1K 数据与官方评测 harness，都来自上游。
 - 决定：
   - 应用层不做模型评测：不跑 `awm bench` 以及 BFCLv3、τ²-bench、MCP-Universe 的 harness，也不批量跑任务后汇总任何比率；
@@ -456,3 +458,24 @@
   - 策略只在启动时加载，改文件要重启；字符串形式的数字不转换，本该自动批准的调用可能交给人工，方向安全；
   - 默认策略下每次 write 都要人工审批，省不了人力；要省，管理员需权衡上面的风险后自行开启 auto_approve 规则；
   - `policy test` 离线分级只看工具名与路由的 HTTP 方法，在线会话还看工具描述，两者可能不同，可以用 `--risk` 指定。
+
+## ADR-028 批量实验：场景级划分、verifier 判定、配对比较
+
+- 背景：
+  - ADR-013 不让应用层统计效果，因为小规模自建任务与临时的比较撑不起结论，并说明回答这类问题需要固定模型、固定任务集、足够样本与预先定好的指标。
+  - 官方 AgentWorldModel-1K 有上千个场景，大部分任务带有官方生成的 pure-code verifier，工作台已经能隔离地运行任意场景并经 `workbench verify` 判定；具备了按这些要求做实验的条件。
+- 决定：新增 `workbench lab` 与 `scripts/lab/`，实验设计在运行前写定（docs/EXPERIMENTS.md）：
+  - 被测对象是"模型 + 本工作台"的整体，任务、verifier 与数据只来自官方数据集，固定修订；
+  - 按场景划分 train / val / test，训练数据只来自 train 场景，checkpoint 只在 val 上选，每个变体在 test 上只评一次；
+  - 成功只由官方 verifier 判定（`reward_type` 为 `complete`），不用模型自评；
+  - 比较都在同一批任务上配对：McNemar 精确检验与配对 bootstrap 区间，单个比率附 Wilson 区间，pass@k 用无偏估计；
+  - 训练数据的三个变体（教师蒸馏、加入学生自身成功轨迹的拒绝采样、不过滤）用同一套训练与选择流程，差别只在数据；
+  - 注入实验只包装网关的返回，不改动网关，三种配置的差别只在策略文件与审批方；
+  - 结果只写到 `data/lab/`（不入库），报告的每个数字都从运行记录计算；要进入 README 或 docs，仍须登记到 `results/registry.yaml`，`make check-numbers` 照常拦截；
+  - GPU 侧（vLLM、LoRA 训练、scikit-learn）用 `data/lab/.venv-gpu`，版本与 train 环境的锁一致但不装 AgentFly 与 veRL：实验不用它们的训练循环，少装一个需要编译 flash-attn 的栈。
+- 后果：
+  - 结论只适用于这一数据集、这一个学生模型与教师模型，且每个配置只有一个种子；
+  - verifier 本身会误判，报告中的成功率是"被 verifier 判为 complete"的比例；
+  - 批量运行用 `configs/lab/eval_policy.yaml` 自动批准 write，与默认策略（不自动批准任何调用）不同，只用于无人值守的实验；
+  - 教师调用 DeepSeek API 产生费用，token 用量逐条记录在运行结果中。
+
