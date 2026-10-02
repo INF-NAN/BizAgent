@@ -24,9 +24,12 @@ def lab_split(
     seed: int = typer.Option(20260601, "--seed"),
     test_scenarios: int = typer.Option(200, "--test-scenarios"),
     val_scenarios: int = typer.Option(100, "--val-scenarios"),
-    test_tasks: int = typer.Option(300, "--test-tasks"),
-    val_tasks: int = typer.Option(100, "--val-tasks"),
+    test_tasks: int = typer.Option(600, "--test-tasks"),
+    val_tasks: int = typer.Option(200, "--val-tasks"),
     train_tasks: int = typer.Option(1500, "--train-tasks"),
+    train_extra_tasks: int = typer.Option(
+        1500, "--train-extra-tasks", help="Reserve train-scenario tasks for more teacher data if needed."
+    ),
     inject_tasks: int = typer.Option(
         200, "--inject-tasks", help="Tasks from test scenarios that have a destructive tool (0: none)."
     ),
@@ -49,7 +52,13 @@ def lab_split(
         verifiers,
         seed=seed,
         scenario_counts={"test": test_scenarios, "val": val_scenarios},
-        task_counts={"test": test_tasks, "val": val_tasks, "train": train_tasks, "inject": inject_tasks},
+        task_counts={
+            "test": test_tasks,
+            "val": val_tasks,
+            "train": train_tasks,
+            "train_extra": train_extra_tasks,
+            "inject": inject_tasks,
+        },
         inject_scenarios=destructive_scenarios(ds, settings.gateway.policy_file) if inject_tasks else None,
     )
     path = write_split(lab_dir, split, verifiers, seed)
@@ -183,18 +192,23 @@ def lab_sft_data(
     match_stats: Path | None = typer.Option(
         None, "--match", help="Use as many episodes as the stats file of another variant reports."
     ),
+    exclude_trivial: list[str] = typer.Option(
+        [], "--exclude-trivial", help="Null-agent run tag; tasks it passed are left out (repeatable)."
+    ),
 ) -> None:
     """Build chat-format SFT samples from recorded episodes."""
+    from workbench.lab.episodes import trivial_tasks
     from workbench.lab.sft_data import build
 
     if match_stats is not None:
-        max_episodes = int(json.loads(match_stats.read_text(encoding="utf-8"))["used_episodes"])
+        max_episodes = int(json.loads(match_stats.read_text(encoding="utf-8")).get("used_episodes", 0))
     summary = build(
         [lab_dir / "runs" / r for r in runs],
         out,
         include_failed=include_failed,
         max_per_task=max_per_task,
         max_episodes=max_episodes,
+        exclude_tasks=trivial_tasks([lab_dir / "runs" / t for t in exclude_trivial]),
     )
     console.print_json(data=summary)
 
@@ -203,25 +217,38 @@ def lab_sft_data(
 def lab_select(
     variant: str = typer.Option(..., "--variant"),
     lab_dir: Path = typer.Option(LAB_DIR, "--lab-dir", envvar="WORKBENCH_LAB_DIR"),
+    trivial_run: str = typer.Option(
+        "null-val", "--trivial-run", help="Null-agent run on val; tasks it passed do not count."
+    ),
 ) -> None:
-    """Pick the checkpoint with the best val success rate (ties: the earlier one)."""
-    from workbench.lab.episodes import load_results
-    from workbench.lab.report import run_summary
+    """Pick the checkpoint with the best val success rate on non-trivial tasks (ties: the earlier one)."""
+    from workbench.lab.episodes import load_results, trivial_tasks
+    from workbench.lab.metrics import rate
 
+    trivial = trivial_tasks([lab_dir / "runs" / trivial_run])
     prefix = f"sft-{variant}-val-"
     scores = []
     for d in sorted((lab_dir / "runs").glob(f"{prefix}*")):
-        s = run_summary(load_results(d / "results.jsonl"))
+        rows = [r for r in load_results(d / "results.jsonl") if r.get("sample", 0) == 0]
+        kept = [r for r in rows if f"{r['scenario']}#{r['task_id']}" not in trivial]
+        s = rate(kept)
         step = int(d.name.rsplit("-", 1)[-1])
-        scores.append((-s["rate"], step, d.name[len(prefix) :], s))
+        scores.append((-s["rate"], step, d.name[len(prefix) :], s, rate(rows)))
     if not scores:
         console.print(f"[red]no {prefix}* runs[/]")
         raise typer.Exit(code=1)
     scores.sort(key=lambda x: (x[0], x[1]))
-    _, _, ck, s = scores[0]
+    _, _, ck, s, all_tasks = scores[0]
     out = lab_dir / "sft" / variant / "selected.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    doc = {"checkpoint": ck, "val_rate": s["rate"], "val_success": s["success"], "val_n": s["n"]}
+    doc = {
+        "checkpoint": ck,
+        "val_rate": s["rate"],
+        "val_success": s["success"],
+        "val_n": s["n"],
+        "val_trivial_excluded": len(trivial),
+        "val_rate_all_tasks": all_tasks["rate"],
+    }
     out.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     typer.echo(ck)
 

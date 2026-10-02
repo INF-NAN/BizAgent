@@ -78,6 +78,7 @@ def build(
     max_per_task: int | None = None,
     max_episodes: int | None = None,
     seed: int = 0,
+    exclude_tasks: set[str] | None = None,
 ) -> dict[str, Any]:
     """Write ``out`` (one JSON sample per line) from the episodes of ``run_dirs``.
 
@@ -85,7 +86,8 @@ def build(
     every episode that ran to the end). ``max_per_task`` caps the episodes kept per task across
     all run dirs, in the order given, so tasks the model already solves often do not dominate.
     ``max_episodes`` keeps a seeded random subset of that many episodes, so an ablation can use
-    as many episodes as the variant it is compared with.
+    as many episodes as the variant it is compared with. ``exclude_tasks`` (``scenario#task_id``)
+    drops tasks whose verifier also passes when nothing is done: their "successes" teach nothing.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     stats: Counter[str] = Counter()
@@ -101,6 +103,9 @@ def build(
                 stats["missing_recording"] += 1
                 continue
             task_key = f"{r['scenario']}#{r['task_id']}"
+            if exclude_tasks and task_key in exclude_tasks:
+                stats["excluded_trivial"] += 1
+                continue
             if max_per_task is not None and per_task[task_key] >= max_per_task:
                 stats["capped"] += 1
                 continue
@@ -129,6 +134,7 @@ def build(
                 stats["samples"] += 1
                 stats["samples_with_tools" if conv["with_tools"] else "samples_without_tools"] += 1
                 stats["assistant_turns"] += sum(1 for m in conv["messages"] if m["role"] == "assistant")
-    summary = {**stats, "tasks": len(tasks), "scenarios": len(scenarios), "out": str(out)}
+    counts = {k: 0 for k in ("episodes", "used_episodes", "used_successful_episodes", "samples")}
+    summary = {**counts, **stats, "tasks": len(tasks), "scenarios": len(scenarios), "out": str(out)}
     out.with_suffix(".stats.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     return summary

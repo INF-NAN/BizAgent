@@ -396,3 +396,74 @@ def test_inject_split_only_uses_test_scenarios_with_destructive_tools() -> None:
 def test_destructive_scenarios_on_the_mini_fixture() -> None:
     found = splits.destructive_scenarios(MINI, Path("configs/tool_policy.yaml"))
     assert found == {"mini_e_commerce"}  # delete_user_payment_method
+
+
+def test_train_extra_follows_train_without_overlap() -> None:
+    tasks = {f"s{i}": [f"t{i}.{j}" for j in range(4)] for i in range(10)}
+    verifiers = {(s, j): {} for s in tasks for j in range(4)}
+    kw: dict[str, Any] = {"scenario_counts": {"test": 2, "val": 2}}
+    out = splits.make_split(tasks, verifiers, seed=1, task_counts={"train": 10, "train_extra": 8}, **kw)
+    plain = splits.make_split(tasks, verifiers, seed=1, task_counts={"train": 10}, **kw)
+    assert out["train"] == plain["train"]  # the reserve does not change the train split
+    assert len(out["train_extra"]) == 8 and all(t.split == "train_extra" for t in out["train_extra"])
+    assert not {t.key for t in out["train"]} & {t.key for t in out["train_extra"]}
+    test_scen = {t.scenario for t in out["test"]}
+    assert not {t.scenario for t in out["train_extra"]} & test_scen
+
+
+def test_sft_build_leaves_out_trivial_tasks(tmp_path: Path) -> None:
+    from workbench.lab.episodes import trivial_tasks
+
+    rows = [{"run_id": f"s{i}__0__s0", "scenario": f"s{i}", "task_id": 0, "success": True} for i in range(4)]
+    d = _fake_run(tmp_path, "teacher", rows)
+    null = _fake_run(tmp_path, "null-train", [{**rows[0]}, {**rows[1], "success": False}])
+    trivial = trivial_tasks([null, tmp_path / "runs" / "missing"])
+    assert trivial == {"s0#0"}
+    stats = sft_data.build([d], tmp_path / "a.jsonl", exclude_tasks=trivial)
+    assert stats["used_episodes"] == 3 and stats["excluded_trivial"] == 1
+
+
+def test_select_ignores_trivial_val_tasks(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from workbench.cli import app
+
+    def rows(succ: list[int]) -> list[dict[str, Any]]:
+        return [
+            {
+                "run_id": f"s{i}__0__s0",
+                "scenario": f"s{i}",
+                "task_id": 0,
+                "success": i in succ,
+                "split": "val",
+            }
+            for i in range(5)
+        ]
+
+    _fake_run(tmp_path, "null-val", rows([0, 1]))
+    _fake_run(tmp_path, "sft-v-val-ckpt-2", rows([0, 1, 2]))  # 3/5 overall, 1/3 non-trivial
+    _fake_run(tmp_path, "sft-v-val-ckpt-4", rows([2, 3]))  # 2/5 overall, 2/3 non-trivial
+    res = CliRunner().invoke(app, ["lab", "select", "--variant", "v", "--lab-dir", str(tmp_path)])
+    assert res.exit_code == 0, res.output
+    sel = json.loads((tmp_path / "sft" / "v" / "selected.json").read_text())
+    assert sel["checkpoint"] == "ckpt-4" and sel["val_n"] == 3 and sel["val_trivial_excluded"] == 2
+
+
+def test_report_process_metrics(tmp_path: Path) -> None:
+    base = [
+        {
+            "run_id": f"s{i}__0__s0",
+            "scenario": f"s{i}",
+            "task_id": 0,
+            "success": False,
+            "steps": 4,
+            "tool_errors": 1,
+        }
+        for i in range(4)
+    ]
+    base[0]["termination"] = {"reason": "plan_invalid"}
+    _fake_run(tmp_path, "base-test", base)
+    doc = collect(tmp_path)
+    m = doc["process"]["base-test"]
+    assert m["episodes"] == 4 and m["share_plan_invalid"] == 0.25 and m["tool_errors_per_episode"] == 1
+    assert "过程指标" in render(doc)

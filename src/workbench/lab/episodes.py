@@ -452,6 +452,15 @@ async def run_eval(
     return await EpisodeRunner(settings, cfg, verifiers, **kwargs).run(tasks)
 
 
+def trivial_tasks(run_dirs: list[Path]) -> set[str]:
+    """``scenario#task_id`` of the tasks a null-agent run (``--backend null``) still passed."""
+    out: set[str] = set()
+    for d in run_dirs:
+        rows = load_results(d / "results.jsonl")
+        out |= {f"{r['scenario']}#{r['task_id']}" for r in rows if r.get("success")}
+    return out
+
+
 def load_results(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []

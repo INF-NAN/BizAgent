@@ -20,6 +20,8 @@ from workbench.envs.catalog import normalize_scenario_name
 SPLITS = ("train", "val", "test")
 # the injection experiment's tasks: test scenarios that have at least one destructive tool
 INJECT = "inject"
+# more train-scenario tasks, used only if the teacher solves too few of the train split
+TRAIN_EXTRA = "train_extra"
 CODE_VERIFIERS = "gen_verifier.pure_code.jsonl"
 
 
@@ -87,7 +89,8 @@ def make_split(
     inject_scenarios: set[str] | None = None,
 ) -> dict[str, list[LabTask]]:
     """train / val / test by scenario; with ``inject_scenarios``, also an ``inject`` task set drawn
-    from the test scenarios among them (it may share tasks with ``test``, never with train)."""
+    from the test scenarios among them (it may share tasks with ``test``, never with train).
+    ``task_counts["train_extra"]`` takes that many further train-scenario tasks, after ``train``."""
     scenarios = sorted(s for s, ts in tasks.items() if any((s, i) in verifiers for i in range(len(ts))))
     rng = random.Random(seed)
     rng.shuffle(scenarios)
@@ -107,7 +110,11 @@ def make_split(
         ]
         rng_split = random.Random(f"{seed}:{split}")
         rng_split.shuffle(pool)
-        out[split] = pool[: task_counts.get(split, len(pool))]
+        n = task_counts.get(split, len(pool))
+        out[split] = pool[:n]
+        if split == "train" and task_counts.get(TRAIN_EXTRA):
+            extra = pool[n : n + task_counts[TRAIN_EXTRA]]
+            out[TRAIN_EXTRA] = [LabTask(t.key, t.scenario, t.task_id, t.task, TRAIN_EXTRA) for t in extra]
     if inject_scenarios is not None:
         pool = [
             LabTask(f"{s}#{i}", s, i, text, INJECT)

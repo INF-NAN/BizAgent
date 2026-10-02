@@ -17,6 +17,7 @@ from typing import Any
 
 from workbench.lab.episodes import load_results
 from workbench.lab.metrics import (
+    GUARD_REASONS,
     failure_category,
     mcnemar_exact,
     paired_bootstrap,
@@ -112,6 +113,32 @@ def paired(
     }
 
 
+def process(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """How the episodes went, verifier aside: these respond to training more steadily than success."""
+    ok = [r for r in rows if r.get("status") == "ok" and r.get("sample", 0) == 0]
+    n = max(1, len(ok))
+
+    def share(pred: Any) -> float:
+        return sum(1 for r in ok if pred(r)) / n
+
+    def reason(r: dict[str, Any]) -> Any:
+        return (r.get("termination") or {}).get("reason")
+
+    return {
+        "episodes": len(ok),
+        "mean_steps": sum(r.get("steps", 0) for r in ok) / n,
+        "mean_tool_calls": sum(r.get("tool_calls", 0) for r in ok) / n,
+        "tool_errors_per_episode": sum(r.get("tool_errors", 0) for r in ok) / n,
+        "share_with_tool_error": share(lambda r: r.get("tool_errors", 0) > 0),
+        "share_plan_invalid": share(lambda r: reason(r) == "plan_invalid"),
+        "share_llm_error": share(lambda r: reason(r) == "llm_error"),
+        "share_guard_stop": share(lambda r: reason(r) in GUARD_REASONS),
+        "share_no_tool_call": share(lambda r: r.get("tool_calls", 0) == 0),
+        "mean_prompt_tokens": sum(r.get("prompt_tokens", 0) for r in ok) / n,
+        "mean_completion_tokens": sum(r.get("completion_tokens", 0) for r in ok) / n,
+    }
+
+
 def injection(rows: list[dict[str, Any]]) -> dict[str, Any]:
     armed = [r for r in rows if r.get("status") == "ok" and r.get("injection")]
     n = len(armed)
@@ -192,6 +219,8 @@ def collect(lab: Path) -> dict[str, Any]:
     if runs.get("base-test") and runs.get("teacher-test"):
         doc["teacher_vs_base_test"] = pair(runs["base-test"], runs["teacher-test"])
     doc["injection"] = {tag: injection(runs[tag]) for tag in INJECTION if runs.get(tag)}
+    process_tags = ["base-test", *(f"sft-{v}-test" for v in SFT_VARIANTS), "teacher-test"]
+    doc["process"] = {t: process(runs[t]) for t in process_tags if runs.get(t)}
     doc["serving"] = [d for p in sorted((lab / "bench").glob("*.json")) if (d := _json(p))]
     doc["risk"] = _json(lab / "risk" / "risk.json")
     return doc
@@ -326,6 +355,24 @@ def render(doc: dict[str, Any]) -> str:
             "",
             f"教师 {p['b_success']}/{p['tasks']}，base {p['a_success']}/{p['tasks']}。",
         ]
+    if doc.get("process"):
+        L += [
+            "",
+            "## 过程指标（test）",
+            "",
+            "不看 verifier，只看 episode 是怎么进行的。teacher-test 只跑了 test 的前一部分任务。",
+            "",
+            "| run | episodes | 平均步数 | 每 episode 工具报错 | 有工具报错 | 计划无效 | LLM 错误 | 守卫终止 "
+            "| 未调用工具 | 平均 prompt tokens |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for tag, m in doc["process"].items():
+            L.append(
+                f"| {tag} | {m['episodes']} | {m['mean_steps']:.1f} | {m['tool_errors_per_episode']:.2f} "
+                f"| {_pct(m['share_with_tool_error'])} | {_pct(m['share_plan_invalid'])} "
+                f"| {_pct(m['share_llm_error'])} | {_pct(m['share_guard_stop'])} "
+                f"| {_pct(m['share_no_tool_call'])} | {m['mean_prompt_tokens']:.0f} |"
+            )
     if doc.get("injection"):
         L += [
             "",
