@@ -11,6 +11,13 @@ usage: python scripts/lab/risk_model.py --lab-dir data/lab --tags base-test base
 
 from __future__ import annotations
 
+import os
+
+# before numpy / scikit-learn load their OpenMP and BLAS runtimes: an invalid or zero
+# OMP_NUM_THREADS (AutoDL presets one) makes them spin on every core; the data here is small
+if not os.environ.get("OMP_NUM_THREADS", "").isdigit() or os.environ["OMP_NUM_THREADS"] == "0":
+    os.environ["OMP_NUM_THREADS"] = "4"
+
 import argparse
 import json
 import math

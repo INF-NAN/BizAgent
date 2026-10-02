@@ -69,6 +69,9 @@ export UV_LINK_MODE=copy
 # keep bytecode out of the upstream submodules (ADR-001)
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$ROOT/.cache/pycache}"
 export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-WARNING}"
+# AutoDL presets OMP_NUM_THREADS to a value libgomp rejects ("Invalid value"); OpenMP code
+# (scikit-learn in the risk stage) then spins on every core and slows down by orders of magnitude
+if ! [[ "${OMP_NUM_THREADS:-}" =~ ^[1-9][0-9]*$ ]]; then export OMP_NUM_THREADS=8; fi
 
 log() { echo "[$(date '+%F %T')] $*"; }
 die() { log "FAILED: $*"; exit 1; }
