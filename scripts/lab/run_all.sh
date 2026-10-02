@@ -13,6 +13,10 @@
 #   CONC=32 (episodes at once against vLLM)  TEACHER_CONC=16  AWM1K_REVISION=dde80a0283fe...
 #   TEACHER_TRAIN_LIMIT=<n> (teacher on the first n of the 1500 train tasks only, to spend less)
 #   SKIP_SETUP=1 (environments, dataset and model already in place)
+#   PREPARE_ONLY=1 (only install the environments and download dataset and model; no GPU or key
+#     needed, so it can run on a CPU-only machine first)
+#   SHUTDOWN_WHEN_DONE=1 (power the machine off when the run ends, finished or failed; results are
+#     packed to <lab dir name>_results.tgz first)
 #   MIN_SFT_EPISODES=20 (a training-data variant with fewer episodes is skipped)
 #   LAB_DIR=data/lab (where everything of this run goes; a trial run uses another one)
 #   SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8" (a small trial run)
@@ -43,6 +47,7 @@ MIN_SFT_EPISODES="${MIN_SFT_EPISODES:-20}"
 TEACHER_MIN_SUCCESS="${TEACHER_MIN_SUCCESS:-600}"
 TEACHER_TEST_LIMIT="${TEACHER_TEST_LIMIT:-300}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
+PREPARE_ONLY="${PREPARE_ONLY:-0}"
 
 # AutoDL: its academic proxy for GitHub / Hugging Face, and a Hugging Face mirror
 if [[ -f /etc/network_turbo ]]; then
@@ -107,12 +112,33 @@ stop_group() {
   for _ in $(seq 1 120); do kill -0 -- "-$1" 2>/dev/null || return 0; sleep 1; done
   kill -KILL -- "-$1" 2>/dev/null || true
 }
+gpu_check() {
+  "$GPY" -c "import torch; assert torch.cuda.is_available(), 'torch sees no CUDA device'; print('cuda ok:', torch.__version__, torch.cuda.get_device_name(0))"
+}
+# pack_results: everything small enough to download (no envs, recordings or checkpoints)
+pack_results() {
+  [[ -d "$LAB" ]] || return 0
+  local rel="${LAB#"$ROOT"/}" out
+  out="$ROOT/$(basename "$LAB")_results.tgz"
+  tar czf "$out" -C "$ROOT" --exclude='.venv-gpu' --exclude='calls' --exclude='ckpt-*' --exclude='envs' \
+    "$rel" 2>/dev/null && log "results packed: $out ($(du -h "$out" | cut -f1))"
+}
 cleanup() {
   stop_group "$STAGE_PID"
   stop_vllm
   stop_group "$TEACHER_PID"
 }
-trap cleanup EXIT
+on_exit() {
+  local rc=$?
+  cleanup
+  if [[ "$PREPARE_ONLY" != 1 ]]; then pack_results || true; fi
+  if [[ "${SHUTDOWN_WHEN_DONE:-0}" == 1 && "$PREPARE_ONLY" != 1 ]]; then
+    log "SHUTDOWN_WHEN_DONE=1: shutting the machine down (exit code $rc)"
+    sync
+    shutdown -h now 2>/dev/null || /usr/bin/shutdown 2>/dev/null || true
+  fi
+}
+trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -156,9 +182,11 @@ eval_vllm() {
 log "lab run in $ROOT"
 # environment servers left behind by a run that was killed outright (kill -9, OOM, reboot)
 pkill -TERM -f "${LAB#"$ROOT"/}/runs/[^ ]*/envs/" 2>/dev/null && { log "stopped servers left by an earlier run"; sleep 3; } || true
-command -v nvidia-smi > /dev/null || die "nvidia-smi not found: a CUDA GPU is required"
-[[ -n "${DEEPSEEK_API_KEY:-}" ]] || die "export DEEPSEEK_API_KEY first (the teacher model)"
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+if [[ "$PREPARE_ONLY" != 1 ]]; then
+  command -v nvidia-smi > /dev/null || die "nvidia-smi not found: a CUDA GPU is required"
+  [[ -n "${DEEPSEEK_API_KEY:-}" ]] || die "export DEEPSEEK_API_KEY first (the teacher model)"
+  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+fi
 free_gb=$(df -Pk "$ROOT" | awk 'NR==2 {print int($4/1024/1024)}')
 log "free disk: ${free_gb} GB"
 (( free_gb >= ${MIN_FREE_GB:-60} )) || die "less than ${MIN_FREE_GB:-60} GB free on $ROOT (models, two Python envs and the runs need it)"
@@ -175,8 +203,12 @@ setup_gpu() {
   local mirror
   mirror="$(python3 -m pip config get global.index-url 2>/dev/null || true)"
   if [[ -n "$mirror" && -z "${UV_DEFAULT_INDEX:-}" ]]; then export UV_DEFAULT_INDEX="$mirror"; fi
-  VIRTUAL_ENV="$GPU_VENV" uv pip install -r scripts/lab/gpu-requirements.txt
-  "$GPY" -c "import torch, vllm, peft, sklearn; assert torch.cuda.is_available(); print(torch.__version__, vllm.__version__, torch.cuda.get_device_name(0))"
+  # --no-config: the app's [tool.uv] constraints (numpy==2.4.2 for AWM) must not apply here;
+  # vLLM 0.19.0 needs numba 0.61.2, hence numpy<2.3
+  VIRTUAL_ENV="$GPU_VENV" uv pip install --no-config -r scripts/lab/gpu-requirements.txt
+  "$GPY" -c "import torch, vllm, peft, sklearn; print(torch.__version__, vllm.__version__)"
+  # without a GPU (PREPARE_ONLY on a CPU-only machine) CUDA is checked when the GPU run starts
+  if nvidia-smi > /dev/null 2>&1; then gpu_check; fi
 }
 get_data() {
   [[ -f data/awm1k/gen_verifier.pure_code.jsonl ]] || bash scripts/download_data.sh
@@ -191,6 +223,11 @@ if [[ "${SKIP_SETUP:-0}" != 1 ]]; then
   stage data get_data
   stage model get_model
 fi
+if [[ "$PREPARE_ONLY" == 1 ]]; then
+  log "prepared: environments, dataset and model are in place (PREPARE_ONLY=1, nothing else runs)"
+  exit 0
+fi
+gpu_check || die "CUDA is not available in the GPU env (see the line above)"
 # shellcheck disable=SC2086  # SPLIT_ARGS is a list of options
 stage split wb lab split ${SPLIT_ARGS:-}
 
