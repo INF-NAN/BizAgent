@@ -187,15 +187,17 @@ tail -f data/lab/run.log
 - 停止运行：`kill <run_all.sh 的进程号>`。脚本会停掉 vLLM 和后台的教师运行；评测进程收到 SIGTERM 时关闭所有打开的环境再退出。
 - 如果机器被直接关掉（kill -9、内存不足、重启），下次启动时脚本先清理上次遗留的环境 server。
 
-可选环境变量见脚本开头：`BASE_MODEL`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`。
+可选环境变量见脚本开头：`BASE_MODEL`、`MAX_MODEL_LEN`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`TEACHER_MIN_SUCCESS`、`TEACHER_TEST_LIMIT`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`、`PREPARE_ONLY`、`SHUTDOWN_WHEN_DONE`。
 
-建议先做一次很小的试运行。它用一个单独的目录，每个阶段（包括 vLLM、LoRA 训练与多 LoRA 服务）都会在真实 GPU 上跑一遍，几十个 episode，用来在正式运行前暴露环境问题：
+建议先做一次很小的试运行。它用一个单独的目录，每个阶段（包括 vLLM、LoRA 训练与多 LoRA 服务）都会在真实 GPU 上跑一遍，几十个 episode，用来在正式运行前暴露环境问题。试运行要关掉教师的备用任务（`TEACHER_MIN_SUCCESS=0`、`--train-extra-tasks 0`），否则教师解出的任务必然不足阈值，会去跑 1500 个备用任务：
 
 ```bash
-mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_TRAIN_LIMIT=16 \
-  SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8" \
+mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_MIN_SUCCESS=0 \
+  SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 40 --train-extra-tasks 0 --inject-tasks 8" \
   bash scripts/lab/run_all.sh > data/lab-trial.log 2>&1
 ```
+
+只有安装与下载不需要 GPU。`PREPARE_ONLY=1` 只做这一部分（应用环境、GPU 环境、数据集、基座模型），不检查 GPU，也不需要 key，可以先在没有 GPU 的机器上完成；之后在有 GPU 的机器上运行时，会先检查 GPU 环境里的 CUDA 是否可用。`SHUTDOWN_WHEN_DONE=1` 在运行结束（完成或出错停下）时先把结果打包成 `<目录名>_results.tgz`（不含环境、调用录制与 checkpoint），再关机。
 
 试运行装好的 GPU 环境、数据集与模型会被正式运行直接复用；它的结果在 `data/lab-trial/`，与正式运行的 `data/lab/` 互不影响。
 
