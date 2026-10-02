@@ -24,6 +24,10 @@ UsageHook = Callable[[dict[str, Any]], None]
 VLLM_EXTRA_BODY: dict[str, Any] = {"chat_template_kwargs": {"enable_thinking": True}}
 
 
+def vllm_extra_body(enable_thinking: bool) -> dict[str, Any]:
+    return {"chat_template_kwargs": {"enable_thinking": enable_thinking}}
+
+
 class LLMClient:
     def __init__(
         self,
@@ -98,7 +102,7 @@ def build_backend(settings: LLMSettings) -> ChatBackend:
         connect_timeout_s=settings.connect_timeout_s,
         read_timeout_s=settings.read_timeout_s,
         stream=settings.stream,
-        extra_body=VLLM_EXTRA_BODY if settings.backend == "vllm" else None,
+        extra_body=vllm_extra_body(settings.enable_thinking) if settings.backend == "vllm" else None,
     )
 
 

@@ -106,6 +106,8 @@ class LLMSettings(BaseModel):
     backoff_max_s: float = 8.0
     stream: bool = True
     temperature: float = 0.6
+    # vllm backend only: Qwen3-style chat templates take enable_thinking; False skips the think block.
+    enable_thinking: bool = True
     # Includes thinking tokens on DeepSeek; ~8.5x the largest completion in the DeepSeek run on
     # official e_commerce_33 (ADR-016).
     max_tokens: int = 8192
