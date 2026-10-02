@@ -190,8 +190,19 @@ fi
 free_gb=$(df -Pk "$ROOT" | awk 'NR==2 {print int($4/1024/1024)}')
 log "free disk: ${free_gb} GB"
 (( free_gb >= ${MIN_FREE_GB:-60} )) || die "less than ${MIN_FREE_GB:-60} GB free on $ROOT (models, two Python envs and the runs need it)"
-command -v uv > /dev/null || { python3 -m pip install -q uv && export PATH="$HOME/.local/bin:$PATH"; }
-command -v uv > /dev/null || die "uv not found and could not be installed"
+# uv: pip (the configured index, then a public mirror and PyPI without the proxy), then the
+# official installer (GitHub, which the AutoDL proxy serves)
+export PATH="$HOME/.local/bin:$PATH"
+install_uv() {
+  python3 -m pip install -q uv && return 0
+  ( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+    python3 -m pip install -q uv -i https://mirrors.aliyun.com/pypi/simple ||
+      python3 -m pip install -q uv -i https://pypi.org/simple ) && return 0
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+}
+command -v uv > /dev/null || { log "installing uv"; install_uv || true; hash -r; }
+command -v uv > /dev/null || die "uv not found and could not be installed (python3: $(python3 --version 2>&1))"
+log "uv: $(uv --version)"
 
 setup_app() {
   git submodule update --init --depth 1 third_party/agent-world-model
