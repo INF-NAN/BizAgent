@@ -187,7 +187,7 @@ tail -f data/lab/run.log
 - 停止运行：`kill <run_all.sh 的进程号>`。脚本会停掉 vLLM 和后台的教师运行；评测进程收到 SIGTERM 时关闭所有打开的环境再退出。
 - 如果机器被直接关掉（kill -9、内存不足、重启），下次启动时脚本先清理上次遗留的环境 server。
 
-可选环境变量见脚本开头：`BASE_MODEL`、`MAX_MODEL_LEN`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`TEACHER_MIN_SUCCESS`、`TEACHER_TEST_LIMIT`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`、`PREPARE_ONLY`、`SHUTDOWN_WHEN_DONE`。
+可选环境变量见脚本开头：`BASE_MODEL`、`MAX_MODEL_LEN`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`TEACHER_MIN_SUCCESS`、`TEACHER_TEST_LIMIT`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`SFT_VARIANTS`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`、`PREPARE_ONLY`、`SHUTDOWN_WHEN_DONE`。
 
 建议先做一次很小的试运行。它用一个单独的目录，每个阶段（包括 vLLM、LoRA 训练与多 LoRA 服务）都会在真实 GPU 上跑一遍，几十个 episode，用来在正式运行前暴露环境问题。试运行要关掉教师的备用任务（`TEACHER_MIN_SUCCESS=0`、`--train-extra-tasks 0`），否则教师解出的任务必然不足阈值，会去跑 1500 个备用任务：
 

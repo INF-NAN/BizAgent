@@ -18,6 +18,8 @@
 #   SHUTDOWN_WHEN_DONE=1 (power the machine off when the run ends, finished or failed; results are
 #     packed to <lab dir name>_results.tgz first)
 #   MIN_SFT_EPISODES=20 (a training-data variant with fewer episodes is skipped)
+#   SFT_VARIANTS="teacher rft unfiltered" (the variants trained and evaluated; leave one out to save
+#     its training time, the report then has no row for it)
 #   LAB_DIR=data/lab (where everything of this run goes; a trial run uses another one)
 #   SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8" (a small trial run)
 set -euo pipefail
@@ -42,7 +44,7 @@ MODEL_DIR="$ROOT/data/models/$(basename "$BASE_MODEL")"
 SERVED=base
 PORT=8000
 VLLM_URL="http://127.0.0.1:$PORT/v1"
-VARIANTS=(teacher rft unfiltered)
+read -ra VARIANTS <<< "${SFT_VARIANTS:-teacher rft unfiltered}"
 MIN_SFT_EPISODES="${MIN_SFT_EPISODES:-20}"
 TEACHER_MIN_SUCCESS="${TEACHER_MIN_SUCCESS:-600}"
 TEACHER_TEST_LIMIT="${TEACHER_TEST_LIMIT:-300}"
