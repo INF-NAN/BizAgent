@@ -13,6 +13,8 @@
 | meta-pytorch/OpenEnv | 未纳入 | 参考版本 `e401886d23aab1be92493ea15e5d7e2cdf7e657b` | 对照 AWM 环境适配的实现，文中以永久链接引用 |
 | HF 数据集 `Snowflake/AgentWorldModel-1K` | `make data` 下载到 `data/awm1k/`，不入库 | 本仓库使用 revision `dde80a0283fe781bdc51656bce57063dc5650213`，下载时写入 `data/awm1k/MANIFEST.json` | 官方场景 |
 | HF 模型 `Snowflake/Arctic-AWM-4B/8B/14B` | 不入库，由 vLLM 在运行时下载 | 4B `437dfa0`、8B `63ebcb9`、14B `fa3e3b1` | 模型服务 |
+| HF 模型 `Qwen/Qwen3-4B-Instruct-2507` | 不入库，`scripts/lab/run_all.sh` 下载到 `data/models/` | 按名称下载，不固定修订 | 批量实验的基座与学生模型（Apache-2.0） |
+| DeepSeek API | 外部服务 | 模型名由 `TEACHER_MODEL` 指定，默认 `deepseek-flash` | 批量实验的教师 |
 
 `patches/` 不存在：本仓库没有修改过任何上游文件。核对方式：
 
@@ -45,14 +47,16 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 | `LICENSE` | 本仓库自有代码的 MIT 许可证（第 3.2 节） |
 | `README.md` | 项目说明 |
 | `docs/ARCHITECTURE.md` | 分层图、审批写操作时序图、智能体状态机、prompt 版本 |
-| `docs/DECISIONS.md` | 架构决策记录 ADR-001 至 ADR-027 |
+| `docs/DECISIONS.md` | 架构决策记录 ADR-001 至 ADR-028 |
 | `docs/UPSTREAM.md` | 本文件 |
 | `docs/WALKTHROUGH.md` | 学习路线 |
 | `docs/DEPLOYMENT.md` | GPU 模型服务与 smoke 训练的部署指南 |
+| `docs/EXPERIMENTS.md` | 批量实验的设计、运行方式与局限（ADR-028） |
 | `docs/RESULTS.md` | 由 `results/registry.yaml` 生成，勿手改 |
 | `docs/examples/*.md` | 官方 `e_commerce_33` 的工具清单与一次 DeepSeek 端到端运行的记录（CC-BY-4.0 摘录，第 5 节） |
 | `docs/assets/*.png` | README 的 mock 演示截图，由 `scripts/demo_ui_check.py` 生成 |
 | `results/registry.yaml` | 论文数字登记（数值来自论文，结构由本仓库维护） |
+| `results/lab/` | 批量实验一次完整运行生成的报告与 `summary.json` |
 | `pyproject.toml`、`uv.lock`、`.python-version` | app 环境 |
 | `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，CI 不安装）；flash-attn 的构建环境使用锁定的 torch（ADR-025） |
 | `Makefile` | 开发入口 |
@@ -69,6 +73,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 | `configs/pricing.yaml` | 合成账本的价格表（上界口径） |
 | `configs/number_whitelist.yaml` | 数字守卫的白名单（工程数字，逐条写明理由） |
 | `configs/train/` | smoke 训练 profile、数据与说明 |
+| `configs/lab/` | 批量实验的审批策略：自动批准 write（`eval_policy.yaml`）、另外拒绝全部 destructive（`deny_destructive.yaml`） |
 | `scripts/download_data.sh` | 数据集下载 |
 | `scripts/serve_vllm.sh` | 按 serving profile 启动 vLLM |
 | `scripts/demo_ui_check.py` | 浏览器端 demo 自检（Playwright），生成 README 截图 |
@@ -76,6 +81,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 | `scripts/measure_preview.py` | 审批前预演各阶段耗时的测量脚本 |
 | `scripts/check_links.py` | README 与 `docs/**/*.md` 的相对链接与图片检查 |
 | `scripts/redact_log.py` | 分享日志前脱敏（token、URL 凭据、邮箱、卡号、电话） |
+| `scripts/lab/` | 批量实验：一键脚本 `run_all.sh`、GPU 环境依赖、LoRA 训练、失败预测模型 |
 | `src/workbench/{__init__,cli,config,doctor,runtime}.py` | CLI、配置、自检、运行时装配 |
 | `src/workbench/subprocess_env.py` | 子进程环境变量白名单（ADR-017）与训练环境白名单（ADR-024） |
 | `src/workbench/verify.py` | `workbench verify`：不把 key 交给 `awm verify`（ADR-023） |
@@ -88,6 +94,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 | `src/workbench/synth/` | 合成编排：步骤计划、checkpoint、LLM 代理（缓存、重试、账本、预算熔断）、中断回收、校验报告 |
 | `src/workbench/train/` | 训练启动器：profile 约束、preflight、launch |
 | `src/workbench/results/` | registry 加载、RESULTS.md 生成、数字守卫 |
+| `src/workbench/lab/` | 批量实验：场景级划分、episode 运行与验证、LLM 调用录制、注入、SFT 数据、推理服务回放、统计与报告 |
 | `ui/` | 静态 UI（无构建步骤） |
 | `tests/unit/`、`tests/integration/`、`tests/conftest.py` | 测试 |
 | `tests/fixtures/awm_mini/` | 手写的迷你电商场景 `mini_e_commerce`，按 AWM 数据格式编写。7 个工具的名称、参数名、必填字段与顶层返回字段与官方 `e_commerce_33` 一致；代码、表、样例数据、任务与 verifier 都是手写的，没有复制官方内容（来源说明见其 `MANIFEST.json`） |
@@ -124,6 +131,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 
 - 数据集与模型权重不提交进仓库，只提供下载方式：`make data`（`scripts/download_data.sh`，可用 `AWM1K_REVISION` 固定 revision）与 vLLM 的运行时下载。
 - 官方数据只读。自合成的环境只放在 `data/synth/<run>/`，manifest 标记 `origin: local-synth`，与官方数据隔离（ADR-011）。
+- 批量实验（docs/EXPERIMENTS.md）下载基座模型 `Qwen/Qwen3-4B-Instruct-2507`（Apache-2.0）到 `data/models/`，训练出的 LoRA adapter 与全部运行记录留在 `data/lab/`，都不入库；只有生成的报告与 `summary.json` 提交在 `results/lab/`。教师轨迹来自 DeepSeek API 的输出；用这些输出训练模型之前，请自行确认 DeepSeek 服务条款中的相关规定。
 
 ## 5. 署名（CC-BY-4.0）
 

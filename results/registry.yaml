@@ -1,7 +1,8 @@
 # results/registry.yaml
 #
-# The only place in this repository where model-performance numbers live. Every value is a
+# The only place in this repository where paper-reported numbers live. Every value is a
 # paper-reported number, measured by the official models on the official evaluation harnesses.
+# The lab's own measurements are in results/lab/REPORT.md (docs/DECISIONS.md ADR-028).
 # None of them measures this repository's application layer (agent, gateway, memory, services),
 # which is not benchmarked (docs/DECISIONS.md ADR-013).
 #

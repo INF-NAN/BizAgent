@@ -2,7 +2,7 @@
 
 本文说明两件事：在 Linux GPU 机器上用 vLLM 服务 Arctic-AWM-4B，并把 workbench、`awm agent` 与 `awm verify` 接到这个服务；在独立的 train 环境里运行 smoke 训练。CPU 与 mock LLM 的快速开始见 [README](../README.md)，组件关系见 [ARCHITECTURE.md](ARCHITECTURE.md)，上游版本与源码依据见 [UPSTREAM.md](UPSTREAM.md)，文中的 ADR 编号见 [DECISIONS.md](DECISIONS.md)。
 
-本仓库不做效果评测（ADR-013）。本文的命令用于部署服务和跑通链路，单次运行的结果不构成对模型或应用的评价。
+本文的命令用于部署服务和跑通链路，单次运行的结果不构成对模型或应用的评价（ADR-013）。在官方任务上批量评测并训练小模型的一键实验是另一套流程，见 [EXPERIMENTS.md](EXPERIMENTS.md)。
 
 一台机器可以先做模型服务再做 smoke 训练：第 2 节只做一次，开始训练前停掉 vLLM。
 

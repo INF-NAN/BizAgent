@@ -1,0 +1,8 @@
+# GPU venv for the lab (data/lab/.venv-gpu), separate from the app env and from train/ (ADR-002):
+# vLLM serving, LoRA training and the risk model. Same vLLM / transformers / peft versions as the
+# train env's lock (train/uv.lock), without AgentFly and veRL, which the lab does not use.
+vllm==0.19.0
+transformers==4.57.6
+peft==0.21.0
+scikit-learn
+huggingface_hub[cli]
