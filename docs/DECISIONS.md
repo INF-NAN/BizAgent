@@ -472,7 +472,7 @@
   - 成功只由官方 verifier 判定（`reward_type` 为 `complete`），不用模型自评；
   - verifier 本身会误判：先用一个从不回答的模型跑一遍 test，记下什么都不做也被判为 complete 的任务，报告另给去掉这些任务后的成功率与配对比较；
   - 比较都在同一批任务上配对：McNemar 精确检验与配对 bootstrap 区间，单个比率附 Wilson 区间，pass@k 用无偏估计；
-  - 训练数据的三个变体（教师蒸馏、加入学生自身成功轨迹的拒绝采样、不过滤）用同一套训练与选择流程，差别只在数据；不过滤的变体与教师蒸馏变体的 episode 数相同，比较的只是"是否经过 verifier 过滤"；
+  - 训练数据的变体（教师蒸馏、加入学生自身成功轨迹的拒绝采样，以及可选的不过滤消融）用同一套训练与选择流程，差别只在数据；不过滤的变体与教师蒸馏变体的 episode 数相同，比较的只是"是否经过 verifier 过滤"。一次 LoRA 训练在单卡上要数小时，消融默认不跑；
   - 注入实验只包装网关的返回，不改动网关，三种配置的差别只在策略文件与审批方；任务只取自含 destructive 工具的 test 场景（官方数据中约三分之一的场景有这类工具），否则大部分 episode 无从布置注入；
   - 结果只写到 `data/lab/`（不入库），报告的每个数字都从运行记录计算；要进入 README 或 docs，仍须登记到 `results/registry.yaml`，`make check-numbers` 照常拦截；
   - GPU 侧（vLLM、LoRA 训练、scikit-learn）用 `data/lab/.venv-gpu`，版本与 train 环境的锁一致但不装 AgentFly 与 veRL：实验不用它们的训练循环，少装一个需要编译 flash-attn 的栈。

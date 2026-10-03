@@ -24,7 +24,7 @@
 - HTTP/SSE API 与 Web UI：会话、对话、审批卡片、时间线、DB diff 与 AWM 轨迹查看器；网关同时作为 MCP server 对外提供。
 - 合成流水线编排：编排 `awm gen` 各步骤，带 checkpoint 续跑、LLM 本地代理（缓存、重试、账本）、预算熔断、中断回收与校验报告。
 - 训练启动器：preflight 与 smoke 训练在独立的 train 环境中以子进程运行，训练进程只拿白名单环境变量，产物标记 `NO_RESULTS`。
-- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练及其消融、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）。
+- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）。
 
 ## 截图
 
@@ -161,10 +161,11 @@ nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
 - 场景级 train / val / test 划分：test 场景从不出现在训练数据里。
 - verifier 下限：让智能体什么都不做，找出 verifier 误判为成功的任务，比较时另给去掉它们的结果。
 - 4B 基座模型的单次成功率、pass@k 与失败分类。
-- 三种训练数据，训练、选择流程相同，在 test 上配对比较：
+- 两种训练数据，训练、选择流程相同，在 test 上与基座和彼此配对比较：
   - 教师蒸馏；
-  - 加入学生自身成功轨迹的拒绝采样；
-  - 不经 verifier 过滤的消融。
+  - 加入学生自身成功轨迹的拒绝采样。
+
+  另有不经 verifier 过滤的消融，用 `SFT_VARIANTS` 打开。
 - 工具结果注入：三种网关配置，以及训练前后的模型对比。
 - 用录制的真实智能体请求压测 vLLM：前缀缓存与多 LoRA 服务。
 - 不运行 verifier、只凭运行时信号的失败预测（按场景分组交叉验证）。

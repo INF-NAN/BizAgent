@@ -11,7 +11,7 @@
 3. 用更强的模型（教师，DeepSeek API）的轨迹训练小模型，哪种数据最有效：
    - 只用通过 verifier 的教师轨迹（教师蒸馏）；
    - 在此之上加入学生自己采样、通过 verifier 的轨迹（拒绝采样自提升，RFT / expert iteration）；
-   - 不经 verifier 过滤、全部教师轨迹（消融：过滤本身的作用）。
+   - 不经 verifier 过滤、全部教师轨迹（可选的消融：过滤本身的作用，默认不跑）。
 4. 工具结果里被植入的指令（间接 prompt injection）能否让智能体执行破坏性操作；网关的三种配置各挡住多少；训练之后模型是否更容易被诱导。
 5. 真实的智能体流量下，推理服务的前缀缓存与多 LoRA 服务各带来什么。
 6. 不运行 verifier，能否仅凭运行时可观察的信号判断一个 episode 失败了，从而只把一部分 episode 交给人复核。
@@ -90,13 +90,13 @@ verifier 是上游为每个任务自动生成的代码，并不都可靠：有�
 
 `base-passk` 每个任务采样 n = 4 次，用无偏估计 pass@k = 1 − C(n−c, k) / C(n, k)（c 为成功次数）对任务取平均。pass@4 与 pass@1 的差距，就是拒绝采样能利用的空间：模型偶尔能做对的任务，自己的成功轨迹就能成为训练数据。
 
-### 训练：三种数据，同一套训练
+### 训练：不同的数据，同一套训练
 
 数据（`workbench lab sft-data`，`workbench.lab.sft_data`）：
 
 - 一个 episode 的每次 LLM 调用都是一对（消息，回复）。act 调用逐步延长同一段对话，所以一次调用的对话若是后面某次调用的前缀就丢弃，只保留最长的那段；plan 与 verify 调用是独立的对话，原样保留。
 - 每条样本带上请求时发送的工具列表，格式与发给推理服务的请求相同（`_tools_payload`）。
-- 三个变体（都不含平凡任务）：
+- 变体（都不含平凡任务）。默认训练 `teacher` 与 `rft`；`unfiltered` 是消融，多一次 LoRA 训练，用 `SFT_VARIANTS="teacher rft unfiltered"` 打开：
 
   | 变体 | 来源 | 过滤 |
   |---|---|---|
@@ -106,7 +106,7 @@ verifier 是上游为每个任务自动生成的代码，并不都可靠：有�
 
 训练（`scripts/lab/sft_train.py`，在 GPU 环境中运行）：
 
-- 从 `Qwen/Qwen3-4B-Instruct-2507` 出发，三个变体各训练一个 LoRA（rank 64、alpha 128，作用于全部线性层），bf16、梯度检查点。学习率 1e-4、cosine 调度、带 warmup，每步 16 条序列，2 个 epoch，每半个 epoch 存一个 checkpoint。其余超参见脚本参数的默认值。
+- 从 `Qwen/Qwen3-4B-Instruct-2507` 出发，每个变体训练一个 LoRA（rank 64、alpha 128，作用于全部线性层），bf16、梯度检查点。学习率 1e-4、cosine 调度、带 warmup，每步 16 条序列，2 个 epoch，每半个 epoch 存一个 checkpoint。其余超参见脚本参数的默认值。
 - 样本用模型自己的 chat template 和同一份工具列表渲染，与 vLLM 渲染请求的方式相同；工具调用的参数先解析为对象，模板输出的 JSON 与推理时一致。
 - 只在 assistant 轮次上计算 loss：从 `<|im_start|>assistant\n` 之后到 `<|im_end|>`（含）。
 - 训练文本与推理时模型看到的文本逐字一致：对 Qwen3-4B-Instruct-2507，服务时每一轮的请求都正好是渲染后整段对话的前缀，所以每个 assistant 轮次都在与推理时相同的上文之后学习。训练开始前脚本会逐轮检查前 20 条样本，把"推理时 prompt 不是训练文本前缀"的轮次数写进 `train_meta.json` 的 `template_check`，对这个模型应为 0。
@@ -118,7 +118,7 @@ verifier 是上游为每个任务自动生成的代码，并不都可靠：有�
 - 一个 vLLM 进程以多 LoRA 方式同时服务全部 checkpoint（`--enable-lora --lora-modules ...`），每个 checkpoint 在 val 上跑一遍；每个变体选 val 非平凡任务上成功率最高的 checkpoint（并列取更早的），只用它在 test 上评一次。test 不参与任何选择。
 - `unfiltered` 与 `teacher` 的 episode 数相同，两者的差别只在"是否经过 verifier 过滤"，而不是数据量。
 - 某个变体的数据少于 `MIN_SFT_EPISODES`（默认 20）个 episode 时，跳过这个变体并在日志里说明，其余阶段照常进行。
-- 对比都在同一批 test 任务上配对进行：base 与每个变体、`teacher` 与 `rft`（自提升的作用）、`unfiltered` 与 `teacher`（过滤的作用）。每组报告仅一方成功的任务数、McNemar 精确检验的 p 值，以及成功率差的配对 bootstrap 95 区间（5000 次重采样）。
+- 对比都在同一批 test 任务上配对进行：base 与每个变体、`teacher` 与 `rft`（自提升的作用），以及运行了消融时的 `unfiltered` 与 `teacher`（过滤的作用）。每组报告仅一方成功的任务数、McNemar 精确检验的 p 值，以及成功率差的配对 bootstrap 95 区间（5000 次重采样）。
 
 ### 工具结果注入
 
@@ -177,14 +177,14 @@ tail -f data/lab/run.log
    - `base-test`、`base-val`、`base-passk`、`student-train`；
    - 注入实验 A、B、C（`inject` 任务集）；
    - 前缀缓存开、关两组服务压测。
-5. 等待教师完成，生成三份 SFT 数据，依次训练三个 LoRA。
+5. 等待教师完成，生成各变体的 SFT 数据，依次训练各变体的 LoRA。
 6. 启动多 LoRA 服务：各 checkpoint 在 val 上选择 → 各变体的 test → 最好变体的注入实验 → LoRA 服务压测。
 7. 失败预测模型与报告。
 
 可恢复：
 - 每个阶段完成后写 `data/lab/.stages/<阶段>.done`，再次运行同一命令时跳过已完成的阶段，评测从 `results.jsonl` 断点继续。
 - 每个阶段的日志在 `data/lab/logs/`。
-- 停止运行：`kill <run_all.sh 的进程号>`。脚本会停掉 vLLM 和后台的教师运行；评测进程收到 SIGTERM 时关闭所有打开的环境再退出。
+- 停止运行：`kill <run_all.sh 的进程号>`。脚本会停掉 vLLM 和后台的教师运行，即使设置了 `SHUTDOWN_WHEN_DONE=1` 也不关机；评测进程收到 SIGTERM 时关闭所有打开的环境再退出。
 - 如果机器被直接关掉（kill -9、内存不足、重启），下次启动时脚本先清理上次遗留的环境 server。
 
 可选环境变量见脚本开头：`BASE_MODEL`、`MAX_MODEL_LEN`、`TEACHER_MODEL`、`TEACHER_BASE_URL`、`TEACHER_MIN_SUCCESS`、`TEACHER_TEST_LIMIT`、`CONC`、`TEACHER_CONC`、`TEACHER_TRAIN_LIMIT`、`MIN_SFT_EPISODES`、`SFT_VARIANTS`、`LAB_DIR`、`SPLIT_ARGS`、`SKIP_SETUP`、`PREPARE_ONLY`、`SHUTDOWN_WHEN_DONE`。
@@ -203,8 +203,8 @@ mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_MIN_SUCCESS=0
 
 耗时与花费（估计，不是测量）：
 
-- 评测的主要成本是 episode 数：base 模型共约 5300 个 episode，三个变体在 val 与 test 上约 4200 个，注入实验 800 个，verifier 下限约 2300 个（只用 CPU）。
-- 三次 LoRA 训练各自取决于数据量。
+- 评测的主要成本是 episode 数：base 模型共约 5300 个 episode，两个默认变体在 val 与 test 上约 2800 个（加上消融约 4200 个），注入实验 800 个，verifier 下限约 2300 个（只用 CPU）。
+- 每次 LoRA 训练的时间大致与训练数据的 token 数成正比，训练开始时脚本打印样本数与 token 数。
 - 教师的 1800 个 episode 与 GPU 阶段并行，费用由 token 量决定。每次运行的 prompt 与 completion token 总量都记在 `results.jsonl`，可以按 `configs/pricing.yaml` 的价格自行核算；想少花，用 `TEACHER_TRAIN_LIMIT` 只让教师跑一部分训练任务。
 
 ## 输出
@@ -229,5 +229,4 @@ data/lab/
 - 只有一个 4B 学生模型与一个教师模型。
 - verifier 是上游按任务自动生成的代码，本身会误判；报告中的成功率是"被该 verifier 判为 complete"的比例，失败预测的标签也继承了这一点。
 - 注入只有一种位置（第一次读调用的返回）与 5 种模板，只代表一类攻击，不代表所有攻击。
-- 训练时更早轮次前的空思考块与推理时的历史不完全一致（见上文"训练"）。
 - 教师轨迹不包含教师的思考内容，学生学到的是教师可见的回复与工具调用。
