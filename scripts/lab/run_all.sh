@@ -16,7 +16,7 @@
 #   PREPARE_ONLY=1 (only install the environments and download dataset and model; no GPU or key
 #     needed, so it can run on a CPU-only machine first)
 #   SHUTDOWN_WHEN_DONE=1 (power the machine off when the run ends, finished or failed; results are
-#     packed to <lab dir name>_results.tgz first)
+#     packed to <lab dir name>_results.tgz first; a run stopped with kill or Ctrl-C leaves it on)
 #   MIN_SFT_EPISODES=20 (a training-data variant with fewer episodes is skipped)
 #   SFT_VARIANTS="teacher rft unfiltered" (the variants trained and evaluated; leave one out to save
 #     its training time, the report then has no row for it)
@@ -148,15 +148,19 @@ on_exit() {
   local rc=$?
   cleanup
   if [[ "$PREPARE_ONLY" != 1 ]]; then pack_results || true; fi
-  if [[ "${SHUTDOWN_WHEN_DONE:-0}" == 1 && "$PREPARE_ONLY" != 1 ]]; then
+  # stopped on purpose (kill, Ctrl-C): someone is there to change something and start it again
+  if [[ -n "$STOPPED_BY" ]]; then
+    log "stopped by $STOPPED_BY: the machine stays on; the same command resumes the run"
+  elif [[ "${SHUTDOWN_WHEN_DONE:-0}" == 1 && "$PREPARE_ONLY" != 1 ]]; then
     log "SHUTDOWN_WHEN_DONE=1: shutting the machine down (exit code $rc)"
     sync
     shutdown -h now 2>/dev/null || /usr/bin/shutdown 2>/dev/null || true
   fi
 }
 trap on_exit EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+STOPPED_BY=""
+trap 'STOPPED_BY=SIGINT; exit 130' INT
+trap 'STOPPED_BY=SIGTERM; exit 143' TERM
 
 # start_vllm <log name> <extra vllm args...>
 start_vllm() {

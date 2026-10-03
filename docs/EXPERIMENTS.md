@@ -197,7 +197,7 @@ mkdir -p data && LAB_DIR=data/lab-trial MIN_SFT_EPISODES=1 TEACHER_MIN_SUCCESS=0
   bash scripts/lab/run_all.sh > data/lab-trial.log 2>&1
 ```
 
-只有安装与下载不需要 GPU。`PREPARE_ONLY=1` 只做这一部分（应用环境、GPU 环境、数据集、基座模型），不检查 GPU，也不需要 key，可以先在没有 GPU 的机器上完成；之后在有 GPU 的机器上运行时，会先检查 GPU 环境里的 CUDA 是否可用。`SHUTDOWN_WHEN_DONE=1` 在运行结束（完成或出错停下）时先把结果打包成 `<目录名>_results.tgz`（不含环境、调用录制与 checkpoint），再关机。
+只有安装与下载不需要 GPU。`PREPARE_ONLY=1` 只做这一部分（应用环境、GPU 环境、数据集、基座模型），不检查 GPU，也不需要 key，可以先在没有 GPU 的机器上完成；之后在有 GPU 的机器上运行时，会先检查 GPU 环境里的 CUDA 是否可用。`SHUTDOWN_WHEN_DONE=1` 在运行结束（完成或出错停下）时先把结果打包成 `<目录名>_results.tgz`（不含环境、调用录制与 checkpoint），再关机；用 kill 或 Ctrl-C 主动停下时只打包、不关机，改完设置后用同一条命令续跑。
 
 试运行装好的 GPU 环境、数据集与模型会被正式运行直接复用；它的结果在 `data/lab-trial/`，与正式运行的 `data/lab/` 互不影响。
 
