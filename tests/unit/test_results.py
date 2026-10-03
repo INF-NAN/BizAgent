@@ -3,7 +3,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from workbench.results.check_numbers import default_targets, load_whitelist, scan
+from workbench.results.check_numbers import (
+    LAB_REPORT,
+    default_targets,
+    lab_report_values,
+    load_whitelist,
+    scan,
+)
 from workbench.results.registry import DISCLAIMER, RegistryError, load_registry, render_results_md
 
 REG = Path("results/registry.yaml")
@@ -105,4 +111,19 @@ def test_guard_scans_readme_and_all_docs(tmp_path: Path) -> None:
     assert sorted(f.file for f in scan(files, load_registry(REG), wl, tmp_path)) == [
         "docs/a.md",
         "docs/examples/run.md",
+    ]
+
+
+def test_guard_accepts_lab_report_values_with_a_link(tmp_path: Path) -> None:
+    report = tmp_path / "REPORT.md"
+    report.write_text("| base-test | 600 | 221 | 36.8% |\n", encoding="utf-8")
+    lab = lab_report_values(report)
+    (tmp_path / "docs").mkdir()
+    doc = tmp_path / "docs" / "x.md"
+    wl = {"tokens": {}, "files": {}}
+    doc.write_text(f"base 36.8% ([report]({LAB_REPORT})), sft 44.0%\n", encoding="utf-8")
+    assert [f.token for f in scan([doc], load_registry(REG), wl, tmp_path, lab)] == ["44.0%"]
+    doc.write_text("base 36.8%\n", encoding="utf-8")
+    assert [f.reason for f in scan([doc], load_registry(REG), wl, tmp_path, lab)] == [
+        f"lab numbers cited without a link to {LAB_REPORT}"
     ]

@@ -7,9 +7,10 @@
 > It runs an isolated AWM MCP environment per session and routes every tool call through a deny-first MCP gateway: ordered approval rules decide each call, the shipped default auto-approves nothing, and a write that needs a person is first previewed in a throwaway shadow environment, then approved with a one-time token and audited.
 > A LangGraph agent, an HTTP/SSE API and a small web UI drive the environments; the repo also orchestrates AWM's synthesis pipeline and launches smoke-only training in a separate environment.
 > Everything runs on CPU with a scripted mock LLM; OpenAI-compatible endpoints and vLLM plug in through configuration.
-> The repository produces no model performance numbers: paper numbers live only in `results/registry.yaml`, and the application layer is not benchmarked.
+> A batch lab (`workbench lab`, one script on one GPU) runs the whole stack on official tasks with scenario-level splits and the official code verifiers: base-model evaluation, teacher distillation vs. verifier-filtered rejection sampling, tool-output injection against three gateway configurations, serving benchmarks on recorded agent traffic, and a verifier-free failure predictor.
+> Numbers in the docs come from two places only: paper numbers from `results/registry.yaml`, and the lab's own measurements from the committed report of a full run, `results/lab/REPORT.md` (analysis: `docs/LAB_RESULTS.md`). On held-out scenarios, LoRA SFT on verified teacher trajectories took Qwen3-4B-Instruct-2507 from 221 to 264 of 600 test tasks (paired McNemar p = 1.183e-05).
 
-把 AWM 的合成 MCP 环境组织成一个可部署、可审计、可演示的企业智能体工作台：环境隔离、工具治理、智能体、API 与 UI、合成与训练的工程化封装。
+把 AWM 的合成 MCP 环境组织成一个可部署、可审计、可演示的企业智能体工作台：环境隔离、工具治理、智能体、API 与 UI、合成与训练的工程化封装；并在官方任务上批量评测与训练小模型（教师蒸馏、拒绝采样 LoRA SFT、注入攻防、推理服务压测），结果以配对统计报告。
 
 ## 功能亮点
 
@@ -23,6 +24,7 @@
 - HTTP/SSE API 与 Web UI：会话、对话、审批卡片、时间线、DB diff 与 AWM 轨迹查看器；网关同时作为 MCP server 对外提供。
 - 合成流水线编排：编排 `awm gen` 各步骤，带 checkpoint 续跑、LLM 本地代理（缓存、重试、账本）、预算熔断、中断回收与校验报告。
 - 训练启动器：preflight 与 smoke 训练在独立的 train 环境中以子进程运行，训练进程只拿白名单环境变量，产物标记 `NO_RESULTS`。
+- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（设计见 [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)，一次完整运行的结果见 [docs/LAB_RESULTS.md](docs/LAB_RESULTS.md)）。
 
 ## 截图
 
@@ -48,6 +50,8 @@ flowchart LR
   API --> MGR["env-manager"] --> ENV
   GW -.->|审批前预演| MGR --> SH["影子环境<br/>会话 DB 的副本 · 用完即回收"]
   SYN["合成编排（离线）"] -.-> MGR
+  LAB["批量实验（离线）<br/>verifier 判定 · LoRA SFT · 报告"] -.->|批量 episode| AG
+  LAB -.->|多 LoRA 服务| LLM
   TR["smoke 训练启动器（独立 train 环境）"] -.-> AF["AgentFly + veRL"]
 ```
 
@@ -147,6 +151,39 @@ uv run workbench doctor        # llm 一项检查端点是否可达
 
 vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`、`workbench serve probe`、`docker compose --profile gpu up`）与 smoke 训练见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
+## 批量实验
+
+`workbench lab` 把整条链路放到官方任务上批量运行，每个 episode 用官方 pure-code verifier 判定。一台单卡机器上一条命令跑完全部实验（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）：
+
+```bash
+export DEEPSEEK_API_KEY=...
+nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
+```
+
+- 场景级 train / val / test 划分：test 场景从不出现在训练数据里。
+- verifier 下限：让智能体什么都不做，找出 verifier 误判为成功的任务，比较时另给去掉它们的结果。
+- 4B 基座模型的单次成功率、pass@k 与失败分类。
+- 两种训练数据，训练、选择流程相同，在 test 上与基座和彼此配对比较：
+  - 教师蒸馏；
+  - 加入学生自身成功轨迹的拒绝采样。
+
+  另有不经 verifier 过滤的消融，用 `SFT_VARIANTS` 打开。
+- 工具结果注入：三种网关配置，以及训练前后的模型对比。
+- 用录制的真实智能体请求压测 vLLM：前缀缓存与多 LoRA 服务。
+- 不运行 verifier、只凭运行时信号的失败预测（按场景分组交叉验证）。
+
+阶段可断点续跑，最后生成 `data/lab/REPORT.md`。
+
+一次完整运行的报告提交在 [results/lab/REPORT.md](results/lab/REPORT.md)，分析见 [docs/LAB_RESULTS.md](docs/LAB_RESULTS.md)。test 的 600 个任务来自训练从未见过的场景；非平凡任务指排除了"什么都不做也被 verifier 判为成功"的任务。配对比较的结果：
+
+| 模型 | 全部 600 个任务 | 非平凡 497 个任务 |
+|---|---|---|
+| base（Qwen3-4B-Instruct-2507） | 36.8% | 25.8% |
+| 教师蒸馏 LoRA SFT | 44.0% | 35.2% |
+| 拒绝采样 LoRA SFT | 41.7% | 32.4% |
+
+教师蒸馏相对 base 的差为 7.2%（配对 bootstrap 95% 区间 [4.0%, 10.3%]，McNemar p = 1.183e-05），非平凡任务上为 9.5%。注入实验中，策略层拒绝 destructive 调用把被诱导的执行从 7.5% 降到 0.0%，任务成功率不变；回放真实智能体流量时，前缀缓存的命中率为 69.1%。
+
 ## 项目结构
 
 ```text
@@ -161,6 +198,7 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 │   ├── synth/           # 合成编排：checkpoint、LLM 代理、账本、预算熔断、校验
 │   ├── train/           # 训练 profile 约束、preflight、launch
 │   ├── results/         # 论文数字 registry、RESULTS.md 生成、数字守卫
+│   ├── lab/             # 批量实验：划分、运行与验证、录制、注入、SFT 数据、服务压测、统计与报告
 │   ├── cli.py           # `workbench` 命令行
 │   ├── config.py        # 配置（configs/app.yaml + 环境变量）
 │   ├── doctor.py        # 环境自检
@@ -168,13 +206,14 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 │   ├── subprocess_env.py# 子进程与训练进程的环境变量白名单
 │   └── verify.py        # `workbench verify`
 ├── ui/                  # 静态 Web UI，无构建步骤
-├── configs/             # 应用配置、工具与审批策略、serving profile、价格表、训练 profile
-├── scripts/             # 数据下载、vLLM 启动、Docker 冒烟、UI 自检、链接检查、预演计时、日志脱敏
+├── configs/             # 应用配置、工具与审批策略、serving profile、价格表、训练 profile、实验策略
+├── scripts/             # 数据下载、vLLM 启动、Docker 冒烟、UI 自检、链接检查、预演计时、日志脱敏；lab/ 为批量实验
 ├── tests/               # 单元与集成测试；fixtures/ 为手写迷你场景与 mock 脚本
 ├── results/registry.yaml# 论文数字的唯一来源
+├── results/lab/         # 批量实验一次完整运行的报告与 summary.json
 ├── train/               # 独立的 train 环境（pyproject + uv.lock）
 ├── third_party/         # AWM 与 AgentFly 子模块（固定 SHA，只读）
-├── docs/                # 架构、决策记录、上游、学习路线、部署、示例、截图
+├── docs/                # 架构、决策记录、上游、学习路线、部署、实验设计与结果、示例、截图
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -186,7 +225,7 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 | `make setup` | 初始化子模块、安装 app 环境、生成迷你夹具、校验 train 锁文件 |
 | `make lint` | 相对链接检查、`ruff check`、`ruff format --check`、`mypy --strict` |
 | `make test` | 全部测试（`make test-unit`、`make test-integration` 分开运行） |
-| `make check-numbers` | 校验 registry，并扫描 README 与 docs 中未登记的性能类数字 |
+| `make check-numbers` | 校验 registry，并扫描 README 与 docs 中既不在 registry、也不在实验报告中的性能类数字 |
 | `make results` | 由 `results/registry.yaml` 重新生成 `docs/RESULTS.md` |
 | `make doctor` | 检查 Python、子模块、数据集、端口、GPU、环境变量与 LLM 后端 |
 | `make data` | 下载官方数据集到 `data/awm1k/`（不入库） |
@@ -199,9 +238,9 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 
 ## 设计边界
 
-- 应用层不评测模型能力。被评测对象（Arctic-AWM、AgentWorldModel-1K 与官方评测 harness）都来自上游，小规模的自建任务不足以支撑效果结论。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 拦截 README 与 docs 中未登记的性能类数字和应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
+- 应用层功能（网关、审批、守卫）不做效果统计，小规模的自建任务不足以支撑效果结论。官方任务上的批量实验有单独的设计（场景级划分、官方 verifier 判定、配对比较，ADR-028），运行记录留在不入库的 `data/lab/`，一次完整运行生成的报告提交在 `results/lab/`。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 要求 README 与 docs 中的性能类数字来自 registry 或这份实验报告，并拦截应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
 - AWM 没有许可证，本仓库只以 submodule 指针引用它，不复制、不打补丁。Docker 镜像内含 AWM 代码，所以只在本地和 CI 构建，不推送到镜像仓库（ADR-003）。
-- 训练只提供 smoke 配置。上游公开了环境适配，没有公开完整的训练配方，所以 smoke 只演示 AgentFly 自带的"rollout → 奖励 → 更新"链路，使用 `calculator` 工具与数学奖励，不接触 AWM 环境，模型不超过 1.7B、LoRA、不超过 5 step，产物标记 `NO_RESULTS`（ADR-012）。
+- AgentFly / veRL 的 RL 训练只提供 smoke 配置。上游公开了环境适配，没有公开完整的训练配方，所以 smoke 只演示 AgentFly 自带的"rollout → 奖励 → 更新"链路，使用 `calculator` 工具与数学奖励，不接触 AWM 环境，模型不超过 1.7B、LoRA、不超过 5 step，产物标记 `NO_RESULTS`（ADR-012）。批量实验在 AWM 任务上的 LoRA SFT 由单独的脚本 `scripts/lab/sft_train.py` 完成，不经过 AgentFly（ADR-028）。
 - 自合成的环境只放在 `data/synth/`，manifest 标记 `origin: local-synth`，不与官方数据混合，也不用于训练（ADR-011）。
 - 风险分级与"空结果"判定是启发式的。以 GET 实现的写操作无法按方法识别，以 POST 实现的纯查询会要求审批；`configs/tool_policy.yaml` 的 `overrides` 与 `workbench gateway export-risk` 导出的表用于人工复核（ADR-006、ADR-007）。
 - 上游生成代码的语义缺陷网关无法识别，例如官方环境接受不存在的 offer ID 并成功写入。这类问题靠审批与 DB diff 暴露，默认策略因此不自动批准任何调用（ADR-027）。
@@ -218,6 +257,8 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 | Agent-One-Lab/verl（AgentFly 嵌套的 veRL fork） | 默认不初始化 | smoke 训练 | Apache-2.0 |
 | HF 数据集 Snowflake/AgentWorldModel-1K | `make data` 下载到 `data/awm1k/`，不入库 | 官方场景 | CC-BY-4.0 |
 | HF 模型 Snowflake/Arctic-AWM-4B/8B/14B | 不入库，vLLM 运行时下载 | 模型服务 | Apache-2.0 |
+| HF 模型 Qwen/Qwen3-4B-Instruct-2507 | 不入库，批量实验下载到 `data/models/` | 批量实验的基座与学生模型 | Apache-2.0 |
+| DeepSeek API | 外部服务 | 批量实验的教师模型 | 服务条款 |
 
 上游只以固定 SHA 的 submodule 引用，本仓库没有修改过任何上游文件。文件级边界、许可证细节与上游接口见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
@@ -227,7 +268,7 @@ vLLM 服务 Arctic-AWM 的方式（serving profile、`workbench serve vllm-cmd`�
 
 - AWM 没有许可证。本仓库只以 submodule 指针引用它，不对 AWM 代码授予任何权利，使用前请自行判断（ADR-003）。
 - AgentFly 与其嵌套的 veRL 为 Apache-2.0。
-- Arctic-AWM-4B/8B/14B 为 Apache-2.0。
+- Arctic-AWM-4B/8B/14B 与 Qwen3-4B-Instruct-2507 为 Apache-2.0。批量实验的教师轨迹来自 DeepSeek API 的输出，用它们训练模型前请确认 DeepSeek 的服务条款。
 - AgentWorldModel-1K 为 CC-BY-4.0；仓库中摘自该数据集的内容（`docs/examples/` 中的工具清单与运行记录、`tests/fixtures/awm_mini/` 借用的工具名与参数名）同样按 CC-BY-4.0。
 
 数据集与模型权重都不入库，只提供下载方式。
