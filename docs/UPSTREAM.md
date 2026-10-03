@@ -13,6 +13,8 @@
 | meta-pytorch/OpenEnv | 未纳入 | 参考版本 `e401886d23aab1be92493ea15e5d7e2cdf7e657b` | 对照 AWM 环境适配的实现，文中以永久链接引用 |
 | HF 数据集 `Snowflake/AgentWorldModel-1K` | `make data` 下载到 `data/awm1k/`，不入库 | 本仓库使用 revision `dde80a0283fe781bdc51656bce57063dc5650213`，下载时写入 `data/awm1k/MANIFEST.json` | 官方场景 |
 | HF 模型 `Snowflake/Arctic-AWM-4B/8B/14B` | 不入库，由 vLLM 在运行时下载 | 4B `437dfa0`、8B `63ebcb9`、14B `fa3e3b1` | 模型服务 |
+| HF 模型 `Qwen/Qwen3-4B-Instruct-2507` | 不入库，`scripts/lab/run_all.sh` 下载到 `data/models/` | 按名称下载，不固定修订 | 批量实验的基座与学生模型（Apache-2.0） |
+| DeepSeek API | 外部服务 | 模型名由 `TEACHER_MODEL` 指定，默认 `deepseek-flash` | 批量实验的教师 |
 
 `patches/` 不存在：本仓库没有修改过任何上游文件。核对方式：
 

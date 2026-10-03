@@ -1,6 +1,6 @@
 # ARCHITECTURE — 分层结构与关键时序
 
-本仓库是应用层与工程层：把上游 AWM 的环境与 AgentFly 的训练框架组织成一个可部署、可审计、可演示的企业 MCP 智能体工作台。模型本身和模型评测不在范围内（ADR-013）。
+本仓库是应用层与工程层：把上游 AWM 的环境与 AgentFly 的训练框架组织成一个可部署、可审计、可演示的企业 MCP 智能体工作台。应用层功能不做效果评测（ADR-013）；官方任务上的批量评测与训练是单独设计的实验（ADR-028，第 5 节）。
 
 ## 1. 分层图
 
@@ -31,6 +31,7 @@ flowchart TB
     SYN["synth/<br/>编排 awm gen 各步 · checkpoint · LLM 代理（缓存/重试/账本） · 校验"]
     TRAIN["train/<br/>preflight · smoke launch（子进程进入独立 train 环境）"]
     AF["third_party/AgentFly + veRL fork<br/>（GPU）"]
+    LAB["lab/ + scripts/lab/<br/>批量 episode · verifier 判定 · LoRA SFT · 报告"]
   end
 
   UI -->|HTTP / SSE| API --> AGENT
@@ -48,6 +49,8 @@ flowchart TB
   MGR -->|预演时启动 / killpg| SHADOW
   SYN -->|写入 data/synth/，origin: local-synth| MGR
   TRAIN --> AF
+  LAB -->|每个 episode 一个会话| AGENT
+  LAB -->|vLLM，多 LoRA| VLLM
 ```
 
 说明：
@@ -159,3 +162,28 @@ prompt 放在 `src/workbench/agent/prompts/*.md`，文件第一行是 `<!-- prom
 | plan | 1 | 只允许使用运行时注入的工具；标记会改数据的步骤；输出 1–10 步的 JSON |
 | act | 2 | 每轮最多调用一个工具；被拒绝后不重试；`empty` 不算错误；根据 `error` 里的 hints 修正参数。工具的描述与参数 schema 只经请求的原生 `tools` 参数传入，system prompt 只列工具名与风险级别（ADR-016） |
 | verify | 1 | 输出 `complete` / `missing`，以及带来源标记的 `memories` |
+
+## 5. 批量实验的数据流
+
+`workbench lab`（`src/workbench/lab/`）复用应用层的全部组件：每个 episode 是一个普通会话，经同一个网关、审批策略与预演运行，只是审批由运行参数指定的 approver 代替人回答。设计与理由见 [EXPERIMENTS.md](EXPERIMENTS.md) 与 ADR-028，一次完整运行的结果见 [LAB_RESULTS.md](LAB_RESULTS.md)。
+
+```mermaid
+flowchart LR
+  DS[("AgentWorldModel-1K<br/>固定修订")] --> SPLIT["splits.py<br/>按场景划分 train / val / test / inject"]
+  SPLIT --> RUN["episodes.py<br/>Runtime + 信号量 · 每 episode 一个会话"]
+  RUN -->|智能体 · 网关 · 预演| ENVS["隔离环境会话"]
+  RUN -->|recorder.py| CALLS[("calls/*.json.gz<br/>每次 LLM 调用")]
+  ENVS -->|initial.db vs work.db| VER["workbench verify<br/>官方 pure-code verifier"]
+  VER --> RES[("results.jsonl")]
+  CALLS --> SFT["sft_data.py<br/>只取通过 verifier 的 episode"]
+  SFT --> TRN["scripts/lab/sft_train.py<br/>LoRA，assistant-only loss"]
+  TRN --> SRV["vLLM 多 LoRA 服务"]
+  SRV --> RUN
+  CALLS --> BENCH["serving_bench.py<br/>回放真实请求"]
+  RES --> REP["report.py<br/>配对检验 · REPORT.md"]
+  BENCH --> REP
+```
+
+- 教师（API）与学生（本地 vLLM）走同一条路径，差别只在 LLM 后端配置。
+- `NullBackend` 让智能体什么都不做，用来测出 verifier 的误判下限；`InjectingGateway` 包在真实网关外面，只改动读调用的返回。
+- 运行记录与 adapter 在 `data/lab/`，报告提交在 `results/lab/`。

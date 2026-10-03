@@ -1,8 +1,8 @@
 # WALKTHROUGH — 学习路线
 
-这份路线面向第一次读这个仓库的工程师，按"环境 → 合成 → 服务 → 网关 → 智能体与 UI → 训练启动器 → 数字纪律"的顺序展开。每一步写明目标、命令，以及要读的源码和测试。
+这份路线面向第一次读这个仓库的工程师，按"环境 → 合成 → 服务 → 网关 → 智能体与 UI → 训练启动器 → 数字纪律 → 批量实验"的顺序展开。每一步写明目标、命令，以及要读的源码和测试。
 
-命令都在仓库根目录执行。`workbench` 安装在 app 环境里，下文省略前缀 `uv run`；`scripts/` 下的 Python 脚本照写 `uv run python …`。除 GPU 上的模型服务与 smoke 训练外，所有步骤都能在 CPU + mock LLM 下运行；GPU 部分见 [docs/DEPLOYMENT.md](DEPLOYMENT.md)。
+命令都在仓库根目录执行。`workbench` 安装在 app 环境里，下文省略前缀 `uv run`；`scripts/` 下的 Python 脚本照写 `uv run python …`。除 GPU 上的模型服务、smoke 训练与批量实验的完整运行外，所有步骤都能在 CPU + mock LLM 下运行；GPU 部分见 [docs/DEPLOYMENT.md](DEPLOYMENT.md) 与 [docs/EXPERIMENTS.md](EXPERIMENTS.md)。
 
 先读 [README](../README.md)、[docs/ARCHITECTURE.md](ARCHITECTURE.md)（分层、时序与状态机）、[docs/DECISIONS.md](DECISIONS.md)（ADR）和 [docs/UPSTREAM.md](UPSTREAM.md)（上游版本、许可证与接口要点，精确到上游文件与行号）。
 
@@ -426,3 +426,28 @@ make results          # workbench results render：由 results/registry.yaml 重
 - 改动 README 或 docs 后运行 `make check-numbers`，改动 registry 后运行 `make results`。`make check-links` 检查 README 与 docs 中所有相对链接和锚点。
 
 阅读：`results/registry.yaml`、`src/workbench/results/registry.py`、`src/workbench/results/check_numbers.py`、`configs/number_whitelist.yaml`、`docs/RESULTS.md`、`scripts/check_links.py`；测试 `tests/unit/test_results.py`、`tests/unit/test_check_links.py`。
+
+## 8. 批量实验：在官方任务上评测与训练
+
+目标：理解 `workbench lab` 怎样把整条链路放到大量官方任务上运行、判定、训练和统计（ADR-028）。设计见 [EXPERIMENTS.md](EXPERIMENTS.md)，一次完整运行的结果见 [LAB_RESULTS.md](LAB_RESULTS.md)。
+
+不需要 GPU 也能看懂每一步：划分与 verifier 下限只用 CPU。下载官方数据集后：
+
+```bash
+workbench lab split --test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8 --lab-dir data/lab-cpu
+workbench lab eval --split test --tag null-test --backend null --lab-dir data/lab-cpu   # 什么都不做的智能体
+workbench lab report --lab-dir data/lab-cpu
+```
+
+- `split` 按场景划分，写出 `splits.json`；`eval --backend null` 跑出被 verifier 误判为成功的"平凡任务"；`report` 从运行记录生成 `REPORT.md` 与 `summary.json`。
+- 换成 `--backend vllm` 或 `--backend openai_compat` 就是真实模型的评测；`sft-data`、`select`、`bench` 与 `scripts/lab/sft_train.py` 组成训练与选择；`scripts/lab/run_all.sh` 按顺序跑完全部阶段，可断点续跑。
+
+阅读：
+
+- `src/workbench/lab/splits.py`：场景级划分、含 destructive 工具的注入场景；
+- `src/workbench/lab/episodes.py`：并发运行、approver、`NullBackend`、`InjectingGateway`、基础设施错误的重试；
+- `src/workbench/lab/recorder.py`、`src/workbench/lab/sft_data.py`：LLM 调用录制与 SFT 样本；
+- `src/workbench/lab/metrics.py`、`src/workbench/lab/report.py`：失败分类、McNemar、配对 bootstrap、Wilson 区间、pass@k；
+- `src/workbench/lab/serving_bench.py`：回放录制的请求压测推理服务；
+- `scripts/lab/sft_train.py`、`scripts/lab/risk_model.py`、`scripts/lab/run_all.sh`；
+- 测试：`tests/unit/test_lab.py`。
