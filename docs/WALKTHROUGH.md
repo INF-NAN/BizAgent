@@ -419,9 +419,10 @@ make check-numbers    # workbench results check
 make results          # workbench results render：由 results/registry.yaml 重新生成 docs/RESULTS.md
 ```
 
-- 应用层不做效果评测，本仓库不产生任何模型性能数字。
-- 性能数字只来自 `results/registry.yaml`，即论文 arXiv 2602.10090 v3 的报告值，每条带 `source` 与 `verified`。引用这些数值的页面必须带上免责声明，原文是 `src/workbench/results/registry.py` 中的 `DISCLAIMER`。
-- `workbench results check` 扫描 README 与 `docs/**/*.md` 中像性能数字的写法：百分数、两位小数、Pass@k。每一处都必须是 registry 中的值，或在 `configs/number_whitelist.yaml` 中带理由列出；应用层效果类措辞直接报错。有问题时退出码为 1。
+- 应用层功能不做效果评测。性能数字只有两个来源：论文报告值与批量实验的报告。
+- 论文报告值登记在 `results/registry.yaml`，即 arXiv 2602.10090 v3 的数值，每条带 `source` 与 `verified`。引用这些数值的页面必须带上免责声明，原文是 `src/workbench/results/registry.py` 中的 `DISCLAIMER`。
+- 批量实验的数字来自提交在 `results/lab/REPORT.md` 的一次完整运行的报告（ADR-028），引用它的页面必须链接到这份报告。
+- `workbench results check` 扫描 README 与 `docs/**/*.md` 中像性能数字的写法：百分数、两位小数、Pass@k。每一处都必须是 registry 中的值、实验报告中的值，或在 `configs/number_whitelist.yaml` 中带理由列出；应用层效果类措辞直接报错。有问题时退出码为 1。
 - 改动 README 或 docs 后运行 `make check-numbers`，改动 registry 后运行 `make results`。`make check-links` 检查 README 与 docs 中所有相对链接和锚点。
 
 阅读：`results/registry.yaml`、`src/workbench/results/registry.py`、`src/workbench/results/check_numbers.py`、`configs/number_whitelist.yaml`、`docs/RESULTS.md`、`scripts/check_links.py`；测试 `tests/unit/test_results.py`、`tests/unit/test_check_links.py`。

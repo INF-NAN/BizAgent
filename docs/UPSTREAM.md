@@ -54,6 +54,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 | `docs/examples/*.md` | 官方 `e_commerce_33` 的工具清单与一次 DeepSeek 端到端运行的记录（CC-BY-4.0 摘录，第 5 节） |
 | `docs/assets/*.png` | README 的 mock 演示截图，由 `scripts/demo_ui_check.py` 生成 |
 | `results/registry.yaml` | 论文数字登记（数值来自论文，结构由本仓库维护） |
+| `results/lab/` | 批量实验一次完整运行生成的报告与 `summary.json` |
 | `pyproject.toml`、`uv.lock`、`.python-version` | app 环境 |
 | `train/pyproject.toml`、`train/uv.lock` | train 环境（只锁定，CI 不安装）；flash-attn 的构建环境使用锁定的 torch（ADR-025） |
 | `Makefile` | 开发入口 |
@@ -128,7 +129,7 @@ pre-commit 的 `no-upstream-edits` 钩子在每次提交时做同样的检查。
 
 - 数据集与模型权重不提交进仓库，只提供下载方式：`make data`（`scripts/download_data.sh`，可用 `AWM1K_REVISION` 固定 revision）与 vLLM 的运行时下载。
 - 官方数据只读。自合成的环境只放在 `data/synth/<run>/`，manifest 标记 `origin: local-synth`，与官方数据隔离（ADR-011）。
-- 批量实验（docs/EXPERIMENTS.md）下载基座模型 `Qwen/Qwen3-4B-Instruct-2507`（Apache-2.0）到 `data/models/`，训练出的 LoRA adapter 与全部运行记录留在 `data/lab/`，都不入库。教师轨迹来自 DeepSeek API 的输出；用这些输出训练模型之前，请自行确认 DeepSeek 服务条款中的相关规定。
+- 批量实验（docs/EXPERIMENTS.md）下载基座模型 `Qwen/Qwen3-4B-Instruct-2507`（Apache-2.0）到 `data/models/`，训练出的 LoRA adapter 与全部运行记录留在 `data/lab/`，都不入库；只有生成的报告与 `summary.json` 提交在 `results/lab/`。教师轨迹来自 DeepSeek API 的输出；用这些输出训练模型之前，请自行确认 DeepSeek 服务条款中的相关规定。
 
 ## 5. 署名（CC-BY-4.0）
 

@@ -8,7 +8,7 @@
 > A LangGraph agent, an HTTP/SSE API and a small web UI drive the environments; the repo also orchestrates AWM's synthesis pipeline and launches smoke-only training in a separate environment.
 > Everything runs on CPU with a scripted mock LLM; OpenAI-compatible endpoints and vLLM plug in through configuration.
 > A batch lab (`workbench lab`, one script on one GPU) runs the whole stack on official tasks with scenario-level splits and the official code verifiers: base-model evaluation, teacher distillation vs. verifier-filtered rejection sampling, tool-output injection against three gateway configurations, serving benchmarks on recorded agent traffic, and a verifier-free failure predictor.
-> The repository commits no model performance numbers: paper numbers live only in `results/registry.yaml`, and lab results stay in the generated, uncommitted `data/lab/REPORT.md`.
+> Numbers in the docs come from two places only: paper numbers from `results/registry.yaml`, and the lab's own measurements from the committed report of a full run, `results/lab/REPORT.md` (analysis: `docs/LAB_RESULTS.md`). On held-out scenarios, LoRA SFT on verified teacher trajectories took Qwen3-4B-Instruct-2507 from 221 to 264 of 600 test tasks (paired McNemar p = 1.183e-05).
 
 把 AWM 的合成 MCP 环境组织成一个可部署、可审计、可演示的企业智能体工作台：环境隔离、工具治理、智能体、API 与 UI、合成与训练的工程化封装。
 
@@ -24,7 +24,7 @@
 - HTTP/SSE API 与 Web UI：会话、对话、审批卡片、时间线、DB diff 与 AWM 轨迹查看器；网关同时作为 MCP server 对外提供。
 - 合成流水线编排：编排 `awm gen` 各步骤，带 checkpoint 续跑、LLM 本地代理（缓存、重试、账本）、预算熔断、中断回收与校验报告。
 - 训练启动器：preflight 与 smoke 训练在独立的 train 环境中以子进程运行，训练进程只拿白名单环境变量，产物标记 `NO_RESULTS`。
-- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)）。
+- 批量实验：官方任务上的场景级划分与 verifier 判定、pass@k、教师蒸馏与拒绝采样自提升的 LoRA 训练、工具结果注入的攻防、真实智能体流量的推理服务压测、无 verifier 的失败预测；一条命令跑完，配对统计出报告（设计见 [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)，一次完整运行的结果见 [docs/LAB_RESULTS.md](docs/LAB_RESULTS.md)）。
 
 ## 截图
 
@@ -172,6 +172,16 @@ nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
 
 阶段可断点续跑，最后生成 `data/lab/REPORT.md`。
 
+一次完整运行的报告提交在 [results/lab/REPORT.md](results/lab/REPORT.md)，分析见 [docs/LAB_RESULTS.md](docs/LAB_RESULTS.md)。test 的 600 个任务来自训练从未见过的场景；非平凡任务指排除了"什么都不做也被 verifier 判为成功"的任务。配对比较的结果：
+
+| 模型 | 全部 600 个任务 | 非平凡 497 个任务 |
+|---|---|---|
+| base（Qwen3-4B-Instruct-2507） | 36.8% | 25.8% |
+| 教师蒸馏 LoRA SFT | 44.0% | 35.2% |
+| 拒绝采样 LoRA SFT | 41.7% | 32.4% |
+
+教师蒸馏相对 base 的差为 7.2%（配对 bootstrap 95% 区间 [4.0%, 10.3%]，McNemar p = 1.183e-05），非平凡任务上为 9.5%。注入实验中，策略层拒绝 destructive 调用把被诱导的执行从 7.5% 降到 0.0%，任务成功率不变；回放真实智能体流量时，前缀缓存的命中率为 69.1%。
+
 ## 项目结构
 
 ```text
@@ -198,6 +208,7 @@ nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
 ├── scripts/             # 数据下载、vLLM 启动、Docker 冒烟、UI 自检、链接检查、预演计时、日志脱敏；lab/ 为批量实验
 ├── tests/               # 单元与集成测试；fixtures/ 为手写迷你场景与 mock 脚本
 ├── results/registry.yaml# 论文数字的唯一来源
+├── results/lab/         # 批量实验一次完整运行的报告与 summary.json
 ├── train/               # 独立的 train 环境（pyproject + uv.lock）
 ├── third_party/         # AWM 与 AgentFly 子模块（固定 SHA，只读）
 ├── docs/                # 架构、决策记录、上游、学习路线、部署、实验、示例、截图
@@ -225,7 +236,7 @@ nohup bash scripts/lab/run_all.sh > data/lab/run.log 2>&1 &
 
 ## 设计边界
 
-- 应用层功能（网关、审批、守卫）不做效果统计，小规模的自建任务不足以支撑效果结论。官方任务上的批量实验有单独的设计（场景级划分、官方 verifier 判定、配对比较，ADR-028），结果写到不入库的 `data/lab/REPORT.md`。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 拦截 README 与 docs 中未登记的性能类数字和应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
+- 应用层功能（网关、审批、守卫）不做效果统计，小规模的自建任务不足以支撑效果结论。官方任务上的批量实验有单独的设计（场景级划分、官方 verifier 判定、配对比较，ADR-028），运行记录留在不入库的 `data/lab/`，一次完整运行生成的报告提交在 `results/lab/`。论文报告的数字只登记在 `results/registry.yaml`，由它生成 [docs/RESULTS.md](docs/RESULTS.md)；`make check-numbers` 要求 README 与 docs 中的性能类数字来自 registry 或这份实验报告，并拦截应用层效果措辞。测试证明的是机制按设计工作，例如写操作一定经过审批、令牌只能用一次、守卫会终止循环（ADR-013）。
 - AWM 没有许可证，本仓库只以 submodule 指针引用它，不复制、不打补丁。Docker 镜像内含 AWM 代码，所以只在本地和 CI 构建，不推送到镜像仓库（ADR-003）。
 - 训练只提供 smoke 配置。上游公开了环境适配，没有公开完整的训练配方，所以 smoke 只演示 AgentFly 自带的"rollout → 奖励 → 更新"链路，使用 `calculator` 工具与数学奖励，不接触 AWM 环境，模型不超过 1.7B、LoRA、不超过 5 step，产物标记 `NO_RESULTS`（ADR-012）。
 - 自合成的环境只放在 `data/synth/`，manifest 标记 `origin: local-synth`，不与官方数据混合，也不用于训练（ADR-011）。

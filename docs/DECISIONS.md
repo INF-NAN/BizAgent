@@ -474,7 +474,7 @@
   - 比较都在同一批任务上配对：McNemar 精确检验与配对 bootstrap 区间，单个比率附 Wilson 区间，pass@k 用无偏估计；
   - 训练数据的变体（教师蒸馏、加入学生自身成功轨迹的拒绝采样，以及可选的不过滤消融）用同一套训练与选择流程，差别只在数据；不过滤的变体与教师蒸馏变体的 episode 数相同，比较的只是"是否经过 verifier 过滤"。一次 LoRA 训练在单卡上要数小时，消融默认不跑；
   - 注入实验只包装网关的返回，不改动网关，三种配置的差别只在策略文件与审批方；任务只取自含 destructive 工具的 test 场景（官方数据中约三分之一的场景有这类工具），否则大部分 episode 无从布置注入；
-  - 结果只写到 `data/lab/`（不入库），报告的每个数字都从运行记录计算；要进入 README 或 docs，仍须登记到 `results/registry.yaml`，`make check-numbers` 照常拦截；
+  - 运行记录、adapter 与训练数据只写到 `data/lab/`（不入库），报告的每个数字都从运行记录计算；一次完整运行生成的 `REPORT.md` 与 `summary.json` 原样提交到 `results/lab/`，README 与 docs 引用实验数字时，`make check-numbers` 要求它出现在这份报告中，且页面链接到报告；
   - GPU 侧（vLLM、LoRA 训练、scikit-learn）用 `data/lab/.venv-gpu`，版本与 train 环境的锁一致但不装 AgentFly 与 veRL：实验不用它们的训练循环，少装一个需要编译 flash-attn 的栈。
 - 后果：
   - 结论只适用于这一数据集、这一个学生模型与教师模型，且每个配置只有一个种子；

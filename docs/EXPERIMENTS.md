@@ -2,7 +2,7 @@
 
 `workbench lab` 把工作台的整条链路（隔离环境、MCP 网关、审批策略与预演、LangGraph 智能体、录制、官方 verifier）放到官方 AgentWorldModel-1K 的大量任务上批量运行，用来回答几个可以被数据检验的问题。`scripts/lab/run_all.sh` 在一台单卡机器上无人值守地跑完全部实验，最后生成 `data/lab/REPORT.md` 与 `data/lab/summary.json`。
 
-本文只写设计与做法，不写结果：结果由报告从运行记录计算，没有运行就没有数字。设计决定的理由见 [DECISIONS.md](DECISIONS.md) ADR-028。
+本文只写设计与做法。结果由报告从运行记录计算，一次完整运行的结果与分析见 [LAB_RESULTS.md](LAB_RESULTS.md)。设计决定的理由见 [DECISIONS.md](DECISIONS.md) ADR-028。
 
 ## 要回答的问题
 
@@ -221,7 +221,7 @@ data/lab/
 └── REPORT.md                           # 报告
 ```
 
-`data/` 不进入 git。要把某个结果写进 README 或 docs，先登记到 `results/registry.yaml`，`make check-numbers` 会拦截未登记的数字（ADR-013）。
+`data/` 不进入 git。一次完整运行的 `REPORT.md` 与 `summary.json` 提交在 `results/lab/`，结果与分析见 [LAB_RESULTS.md](LAB_RESULTS.md)。README 与 docs 中的实验数字必须出现在这份报告中，页面还要链接到它，`make check-numbers` 会拦截其他数字（ADR-013）。
 
 ## 局限
 
