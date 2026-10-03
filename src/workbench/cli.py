@@ -688,8 +688,14 @@ def train_launch(
 
 @results_app.command("check")
 def results_check() -> None:
-    """Validate results/registry.yaml and scan README + docs for unregistered numbers."""
-    from workbench.results.check_numbers import default_targets, load_whitelist, scan
+    """Validate results/registry.yaml and scan README + docs for numbers in neither it nor the lab report."""
+    from workbench.results.check_numbers import (
+        LAB_REPORT,
+        default_targets,
+        lab_report_values,
+        load_whitelist,
+        scan,
+    )
     from workbench.results.registry import RegistryError, load_registry
 
     root = Path.cwd()
@@ -700,7 +706,7 @@ def results_check() -> None:
         raise typer.Exit(code=1) from exc
     whitelist = load_whitelist(root / "configs" / "number_whitelist.yaml")
     files = default_targets(root)
-    findings = scan(files, reg, whitelist, root)
+    findings = scan(files, reg, whitelist, root, lab_report_values(root / LAB_REPORT))
     for f in findings:
         console.print(str(f), style="red", markup=False, highlight=False)
     unverified = sum(1 for e in reg.entries if not e.verified)

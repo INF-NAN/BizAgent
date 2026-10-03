@@ -2,7 +2,7 @@
 
 > 本文件由 `make results`（`workbench results render`）从 `results/registry.yaml` 自动生成，请勿手改。
 > **论文报告值，由官方模型在官方评测 harness 上测得，不是本仓库应用层的测量结果。**
-> 本仓库的应用层（智能体、网关、记忆、服务）从未做过任何基准评测。
+> 本仓库自己的测量（批量实验）不在本页，见 [LAB_RESULTS.md](LAB_RESULTS.md)。
 
 - 论文：arXiv 2602.10090 — Agent World Model: Infinity Synthetic Environments for Agentic Reinforcement Learning
 - 核对的论文版本：v3（2026-05-22）
