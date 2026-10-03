@@ -98,7 +98,7 @@ def render_results_md(reg: Registry) -> str:
         "> 本文件由 `make results`（`workbench results render`）从 `results/registry.yaml` 自动生成，"
         "请勿手改。",
         f"> **{DISCLAIMER}**",
-        "> 本仓库的应用层（智能体、网关、记忆、服务）从未做过任何基准评测。",
+        "> 本仓库自己的测量（批量实验）不在本页，见 [LAB_RESULTS.md](LAB_RESULTS.md)。",
         "",
         f"- 论文：arXiv {paper['arxiv_id']} — {paper['title']}",
         f"- 核对的论文版本：{checked}",

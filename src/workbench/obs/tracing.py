@@ -50,6 +50,11 @@ class TraceHub:
             if q in self._subscribers.get(session_id, []):
                 self._subscribers[session_id].remove(q)
 
+    def forget(self, session_id: str) -> None:
+        """Drop the in-memory events of a finished session (long batch runs would keep them all)."""
+        with self._lock:
+            self._memory.pop(session_id, None)
+
     def events(self, session_id: str) -> list[dict[str, Any]]:
         path = self.path(session_id)
         if path is not None and path.exists():

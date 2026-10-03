@@ -54,8 +54,10 @@ class OpenAICompatBackend:
         self.stream = stream
         self.extra_body = dict(extra_body or {})
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        # pool: waiting for a free connection is not a connect failure; under load (many agents on
+        # one client) it can take as long as a request does
         timeout = httpx.Timeout(
-            connect=connect_timeout_s, read=read_timeout_s, write=read_timeout_s, pool=connect_timeout_s
+            connect=connect_timeout_s, read=read_timeout_s, write=read_timeout_s, pool=read_timeout_s
         )
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout, transport=transport
@@ -122,7 +124,9 @@ class OpenAICompatBackend:
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
-                    break
+                    # read to the end of the response (the server closes it after [DONE]) so the
+                    # connection goes back to the pool instead of being dropped half-read
+                    continue
                 chunk = json.loads(data)
                 if chunk.get("usage"):
                     usage = Usage(
