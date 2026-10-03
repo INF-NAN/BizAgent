@@ -1,7 +1,7 @@
 # BizAgent Workbench
 
-[![ci](https://github.com/IntheFesh/Agent2/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/IntheFesh/Agent2/actions/workflows/ci.yml?query=branch%3Amain)
-[![docker-smoke](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml/badge.svg?branch=main)](https://github.com/IntheFesh/Agent2/actions/workflows/docker-smoke.yml?query=branch%3Amain)
+[![ci](https://github.com/INF-NAN/BizAgent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/INF-NAN/BizAgent/actions/workflows/ci.yml?query=branch%3Amain)
+[![docker-smoke](https://github.com/INF-NAN/BizAgent/actions/workflows/docker-smoke.yml/badge.svg?branch=main)](https://github.com/INF-NAN/BizAgent/actions/workflows/docker-smoke.yml?query=branch%3Amain)
 
 > BizAgent Workbench is an application and engineering layer around Snowflake-Labs/agent-world-model (AWM) and Agent-One-Lab/AgentFly.
 > It runs an isolated AWM MCP environment per session and routes every tool call through a deny-first MCP gateway: ordered approval rules decide each call, the shipped default auto-approves nothing, and a write that needs a person is first previewed in a throwaway shadow environment, then approved with a one-time token and audited.
@@ -62,7 +62,7 @@ flowchart LR
 前置：Linux 或 macOS、`git`、[uv](https://docs.astral.sh/uv/)、Python 3.12（uv 可自动安装）。
 
 ```bash
-git clone https://github.com/IntheFesh/Agent2.git && cd Agent2
+git clone https://github.com/INF-NAN/BizAgent.git && cd BizAgent
 make setup        # 初始化两个顶层子模块，安装 app 环境，生成迷你夹具，校验 train 锁文件
 make doctor       # 缺少官方数据集或 GPU 只给出 warn
 make test         # 单元 + 集成测试（真实 AWM 代码 + mock LLM）

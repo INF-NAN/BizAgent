@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/IntheFesh/Agent2"
-Repository = "https://github.com/IntheFesh/Agent2"
-Documentation = "https://github.com/IntheFesh/Agent2/tree/main/docs"
-Issues = "https://github.com/IntheFesh/Agent2/issues"
+Homepage = "https://github.com/INF-NAN/BizAgent"
+Repository = "https://github.com/INF-NAN/BizAgent"
+Documentation = "https://github.com/INF-NAN/BizAgent/tree/main/docs"
+Issues = "https://github.com/INF-NAN/BizAgent/issues"
 
 [project.scripts]
 workbench = "workbench.cli:app"

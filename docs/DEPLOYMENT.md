@@ -25,8 +25,8 @@
 ```bash
 nvidia-smi                       # GPU 型号、显存与 CUDA Version
 cd /root/autodl-tmp              # AutoDL 的数据盘；其它机器换成空间足够的目录
-git clone https://github.com/IntheFesh/Agent2.git
-cd Agent2
+git clone https://github.com/INF-NAN/BizAgent.git
+cd BizAgent
 git submodule update --init third_party/agent-world-model third_party/AgentFly
 git submodule status
 ```
