@@ -18,10 +18,11 @@
 #   SHUTDOWN_WHEN_DONE=1 (power the machine off when the run ends, finished or failed; results are
 #     packed to <lab dir name>_results.tgz first; a run stopped with kill or Ctrl-C leaves it on)
 #   MIN_SFT_EPISODES=20 (a training-data variant with fewer episodes is skipped)
-#   SFT_VARIANTS="teacher rft unfiltered" (the variants trained and evaluated; leave one out to save
-#     its training time, the report then has no row for it)
+#   SFT_VARIANTS="teacher rft" (the variants trained and evaluated; add unfiltered for the
+#     verifier-filtering ablation, which costs one more LoRA training)
 #   LAB_DIR=data/lab (where everything of this run goes; a trial run uses another one)
-#   SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 16 --inject-tasks 8" (a small trial run)
+#   SPLIT_ARGS="--test-tasks 12 --val-tasks 6 --train-tasks 40 --train-extra-tasks 0 --inject-tasks 8"
+#     (a small trial run)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"
@@ -44,7 +45,7 @@ MODEL_DIR="$ROOT/data/models/$(basename "$BASE_MODEL")"
 SERVED=base
 PORT=8000
 VLLM_URL="http://127.0.0.1:$PORT/v1"
-read -ra VARIANTS <<< "${SFT_VARIANTS:-teacher rft unfiltered}"
+read -ra VARIANTS <<< "${SFT_VARIANTS:-teacher rft}"
 MIN_SFT_EPISODES="${MIN_SFT_EPISODES:-20}"
 TEACHER_MIN_SUCCESS="${TEACHER_MIN_SUCCESS:-600}"
 TEACHER_TEST_LIMIT="${TEACHER_TEST_LIMIT:-300}"
@@ -342,11 +343,16 @@ TEACHER_RUNS=(--run teacher-train --run teacher-train-extra)
 NOT_TRIVIAL=(--exclude-trivial null-train --exclude-trivial null-train_extra)
 stage sft-data-teacher wb lab sft-data "${TEACHER_RUNS[@]}" "${NOT_TRIVIAL[@]}" \
   --out "$LAB/sft/teacher/train.jsonl"
-stage sft-data-rft wb lab sft-data "${TEACHER_RUNS[@]}" --run student-train "${NOT_TRIVIAL[@]}" \
-  --max-per-task 2 --out "$LAB/sft/rft/train.jsonl"
+wanted() { [[ " ${VARIANTS[*]} " == *" $1 "* ]]; }
+if wanted rft; then
+  stage sft-data-rft wb lab sft-data "${TEACHER_RUNS[@]}" --run student-train "${NOT_TRIVIAL[@]}" \
+    --max-per-task 2 --out "$LAB/sft/rft/train.jsonl"
+fi
 # as many episodes as the teacher variant: the ablation changes only whether they were verified
-stage sft-data-unfiltered wb lab sft-data "${TEACHER_RUNS[@]}" "${NOT_TRIVIAL[@]}" --include-failed \
-  --match "$LAB/sft/teacher/train.stats.json" --out "$LAB/sft/unfiltered/train.jsonl"
+if wanted unfiltered; then
+  stage sft-data-unfiltered wb lab sft-data "${TEACHER_RUNS[@]}" "${NOT_TRIVIAL[@]}" --include-failed \
+    --match "$LAB/sft/teacher/train.stats.json" --out "$LAB/sft/unfiltered/train.jsonl"
+fi
 
 # a variant with too few episodes is skipped (and said so) rather than stopping the whole run
 TRAINED=()

@@ -309,7 +309,10 @@ def render(doc: dict[str, Any]) -> str:
             f"| {k.split('@')[1]} | {_pct(v)} |" for k, v in pk.items() if k.startswith("pass@")
         ]
     if doc.get("sft"):
-        L += ["", "## 训练：教师蒸馏、拒绝采样自提升与数据消融（LoRA SFT）", ""]
+        title = (
+            "教师蒸馏、拒绝采样自提升与数据消融" if "unfiltered" in doc["sft"] else "教师蒸馏与拒绝采样自提升"
+        )
+        L += ["", f"## 训练：{title}（LoRA SFT）", ""]
         if doc.get("base_val"):
             b = doc["base_val"]
             L.append(
